@@ -192,9 +192,9 @@ impl Runner {
             Err(_) => DEFAULT_HEAP_MB,
         };
         let dump_max_bytes = match std::env::var("TARDIGRADE_RUNNER_DUMP_MAX") {
-            Ok(v) => v
-                .parse::<u64>()
-                .map_err(|e| format!("bad TARDIGRADE_RUNNER_DUMP_MAX {v:?}: {e} (expected bytes)"))?,
+            Ok(v) => v.parse::<u64>().map_err(|e| {
+                format!("bad TARDIGRADE_RUNNER_DUMP_MAX {v:?}: {e} (expected bytes)")
+            })?,
             Err(_) => DEFAULT_DUMP_MAX_BYTES,
         };
         Ok(Runner {
