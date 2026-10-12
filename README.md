@@ -4,9 +4,29 @@ Minimal MCP stdio server that lets agents (pi coding agent) run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade), the sandboxed Rust V8
 runtime, and exposes exactly one tool, `run_js`: the code goes to a temp file
 and runs as `tardigrade --sandbox [--clock=virtual] --seed=N --timeout=MS <file>` inside a
-Landlock + seccomp caged process with a RAM-only filesystem. It has no host
-handles: no `require`, no `process`, no `fetch`, no filesystem or environment
-access. The one timer primitive, `setTimeout`, is driven by a virtual clock.
+Landlock + seccomp caged process. What the guest can reach is small, and is
+described under [The guest environment](#the-guest-environment).
+
+## The guest environment
+
+The guest's globals are plain ECMAScript plus a small deliberate surface:
+`console`, `setTimeout`/`setInterval`/`clearTimeout`/`clearInterval`,
+`TextEncoder`/`TextDecoder`, `atob`/`btoa`, `structuredClone`,
+`performance`, `WebAssembly`, and tardigrade's own `vm` object. All of the
+following was measured against the real binary, not read off its source:
+
+- No `require`, `process`, `fetch`, `Deno`, `Bun`, `XMLHttpRequest`,
+  `WebSocket` or `Buffer`.
+- `vm.fs` is a working filesystem API — `read`, `readBytes`, `write`,
+  `list`, `remove`, `mkdir`, `exists`, `stat`, `readdir`, `rename` — but
+  it reaches the guest's own RAM filesystem and nothing else. A file written at
+  `/probe.txt` reads back during that run and `list("/")` shows it; the next
+  run starts with an empty root. The host's filesystem is invisible:
+  `vm.fs.exists("/etc/hostname")` is `false`. Paths must be absolute.
+- `vm` also carries `net` (`port`, `listen`, `send`, `close`), `stdin`,
+  `args`, `exit`, `snapshot`, `restore`, `run` and `version`. This server
+  passes the guest no arguments and no stdin. `vm.net` is unused by this server
+  and is not covered by its tests.
 
 ## Limits and fail-closed behavior
 
