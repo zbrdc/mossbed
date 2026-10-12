@@ -3,14 +3,14 @@
 Minimal MCP stdio server that lets agents (pi coding agent) run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade), the sandboxed Rust V8
 runtime, and exposes exactly one tool, `run_js`: the code goes to a temp file
-and runs as `tardigrade --sandbox --clock --seed --timeout <file>` inside a
+and runs as `tardigrade --sandbox [--clock=virtual] --seed=N --timeout=MS <file>` inside a
 Landlock + seccomp caged process with a RAM-only filesystem and no host APIs.
 
 ## Limits and fail-closed behavior
 
-- **Fail closed:** at startup the server runs `tardigrade --sandbox-check`.
-  Unless it reports `supported`, the server stays up but refuses every
-  `run_js` call with a clear error.
+- **Fail closed:** at startup the server runs `tardigrade --sandbox-check` and
+  requires that check to exit successfully. On any other outcome the server
+  stays up but refuses every `run_js` call with a clear error.
 - **Hard deadline:** the caller's `timeout_ms` (default 10 000) is passed to
   tardigrade's own `--timeout` watchdog *and* enforced by this parent, which
   SIGKILLs the child after a 500 ms grace — so the guest's clean exit 124
@@ -24,7 +24,7 @@ Landlock + seccomp caged process with a RAM-only filesystem and no host APIs.
 
 ## Pi hookup
 
-    pi mcp add tardigrade -- /home/dan/git/tardigrade-runner/target/release/tardigrade-runner
+    pi mcp add tardigrade -- /absolute/path/to/tardigrade-runner/target/release/tardigrade-runner
 
 Binary resolution: `TARDIGRADE_BIN` env var, else `--tardigrade=<path>` flag,
 else `../tardigrade/target/release/tardigrade` relative to the working
