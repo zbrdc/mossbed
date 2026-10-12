@@ -242,6 +242,18 @@ impl Runner {
 
 static SCRIPT_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// Remove this process's script directory, best effort.
+///
+/// TempScript removes each script file, but nothing removed the directory
+/// holding them, so a server lifetime used to leave an empty
+/// tardigrade-runner-<pid> behind in /tmp. Call this once, when the process is
+/// finished with the runner: the directory is shared by every [`Runner`] in the
+/// process, so tying the cleanup to a single Runner would let one instance
+/// delete the directory another is still writing into.
+pub fn cleanup_script_dir() {
+    let _ = fs::remove_dir_all(script_dir_path());
+}
+
 /// Best-effort cleanup: Drop removes the guest script even on panic or an
 /// early return between writing it and the run finishing.
 struct TempScript<'a>(&'a Path);
@@ -252,11 +264,19 @@ impl Drop for TempScript<'_> {
     }
 }
 
+/// Where this process keeps the guest scripts it writes.
+///
+/// Shared by the writer and by the cleanup in Drop for Runner, so the two
+/// cannot drift apart.
+fn script_dir_path() -> PathBuf {
+    std::env::temp_dir().join(format!("tardigrade-runner-{}", std::process::id()))
+}
+
 /// 0700 + atomic mkdir closes the /tmp symlink hole: a private dir only we
 /// can enter means a pre-planted symlink can never redirect our writes.
 /// chmod also proves we own a pre-existing dir (mkdir returned EEXIST).
 fn script_dir() -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join(format!("tardigrade-runner-{}", std::process::id()));
+    let dir = script_dir_path();
     match fs::create_dir(&dir) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -389,7 +409,20 @@ mod tests {
         assert_eq!(fs::read_to_string(&script).unwrap(), "console.log(1);");
         drop(TempScript(&script));
         assert!(!script.exists(), "guard must remove the script");
-        assert!(dir.exists(), "per-process dir stays for reuse");
+        assert!(
+            dir.exists(),
+            "per-process dir stays for reuse within the process"
+        );
+
+        // Cleanup is explicit and process-scoped, not tied to one Runner's Drop:
+        // the directory is shared by every Runner in the process, so a Drop that
+        // removed it would delete it out from under a concurrent run. One empty
+        // directory per server lifetime used to accumulate in /tmp; 118 were
+        // found on the build host before this existed. Both tests below share
+        // this directory, so they live in one test rather than racing each other.
+        cleanup_script_dir();
+        assert!(!dir.exists(), "cleanup must remove {dir:?}");
+        cleanup_script_dir(); // and must be harmless when it is already gone
     }
 
     #[test]

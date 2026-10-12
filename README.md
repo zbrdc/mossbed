@@ -52,8 +52,8 @@ following was measured against the real binary, not read off its source:
 - **Script handling:** guest code is written to
   `$TMPDIR/tardigrade-runner-<pid>/<n>.js` — a private `0700` directory, a `0600`
   file created with `O_EXCL` so a pre-planted symlink cannot redirect the write
-  — and removed when the run ends. The directory itself stays, for reuse by
-  later runs.
+  — and removed when the run ends. The directory holding it is reused by later
+  runs in the same process, and removed when the server exits.
 
 ## Build
 

@@ -54,6 +54,9 @@ fn main() {
             break;
         }
     }
+    // The loop is over, so no run can be in flight: drop the per-process
+    // directory rather than leaving an empty one behind for every lifetime.
+    tardigrade_runner::cleanup_script_dir();
 }
 
 fn handle_line(
