@@ -13,22 +13,10 @@
 //!
 //! They skip when the binary is absent, like the rest of the suite.
 
-use tardigrade_runner::{RunOptions, RunStatus, Runner, resolve_bin};
+use tardigrade_runner::{RunOptions, RunStatus};
 
-fn runner() -> Option<Runner> {
-    let bin = resolve_bin(None);
-    if !bin.is_file() {
-        eprintln!(
-            "SKIP: tardigrade binary not found at {} (set TARDIGRADE_BIN to override)",
-            bin.display()
-        );
-        return None;
-    }
-    let mut runner = Runner::new(bin).expect("runner config");
-    runner.sandbox_check().expect("tardigrade --sandbox-check");
-    Some(runner)
-}
-
+mod common;
+use common::runner;
 /// The single most important behaviour for an agent: a bad script must come
 /// back with the kind of error and a location, so the next attempt can be a
 /// correction rather than a guess. Measured: exit 1 and a stderr line naming the

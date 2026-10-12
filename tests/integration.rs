@@ -5,23 +5,10 @@
 //! ../tardigrade/target/release/tardigrade, or TARDIGRADE_BIN).
 //! Each test skips with a message when the binary is not found.
 
-use tardigrade_runner::{
-    DRAIN_CAP_BYTES, RunOptions, RunStatus, Runner, TRUNCATED_MARKER, resolve_bin,
-};
+use tardigrade_runner::{DRAIN_CAP_BYTES, RunOptions, RunStatus, TRUNCATED_MARKER};
 
-fn runner() -> Option<Runner> {
-    let bin = resolve_bin(None);
-    if !bin.is_file() {
-        eprintln!(
-            "SKIP: tardigrade binary not found at {} (set TARDIGRADE_BIN to override)",
-            bin.display()
-        );
-        return None;
-    }
-    let mut runner = Runner::new(bin).expect("runner config");
-    runner.sandbox_check().expect("tardigrade --sandbox-check");
-    Some(runner)
-}
+mod common;
+use common::runner;
 
 #[test]
 fn hello_run_returns_ok_and_captures_stdout() {
