@@ -5,9 +5,22 @@ this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-12
+
 ### Added
 
-- `preload` and `dump`: a run can be handed a RAM-filesystem snapshot to restore before it starts, and can return one afterwards, so a workflow can carry state between runs. Runs stay stateless unless a caller asks.
+- `preload` and `dump`: a run can be handed a RAM-filesystem snapshot to restore
+  before it starts, and can return one afterwards, so a workflow can carry state
+  between runs. Runs stay stateless unless a caller asks for it.
+- `TARDIGRADE_RUNNER_DUMP_MAX` (default 1 MiB) caps an inline dump. An oversize
+  snapshot is suppressed with a note on stderr while the run's own status, stdout
+  and stderr come back intact, so a single result cannot balloon a reply. The
+  ceiling is an operator setting, not a tool argument.
+
+### Fixed
+
+- Preload and dump temp files take sequence-unique names. Two dumps running
+  concurrently in one process used to collide with "File exists".
 
 ## [0.1.0] - 2026-10-12
 
@@ -34,6 +47,7 @@ First release.
 - The suites that need the tardigrade binary skip themselves when it is absent;
   set TARDIGRADE_REQUIRE_TESTS=1 to make that a failure.
 
-[Unreleased]: https://github.com/zbrdc/tardigrade-runner/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zbrdc/tardigrade-runner/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/zbrdc/tardigrade-runner/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zbrdc/tardigrade-runner/releases/tag/v0.1.0
 
