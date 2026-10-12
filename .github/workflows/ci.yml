@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    name: check (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.85", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --examples -- -D warnings
+      - name: Tests
+        run: |
+          set -o pipefail
+          cargo test 2>&1 | tee test-output.txt
+      - name: Report the suites that skipped
+        run: |
+          if grep -q "SKIP: tardigrade binary" test-output.txt; then
+            echo "::warning::The integration, agent and sandbox suites skipped: no tardigrade binary here, so this run is partial. Those are the suites that test the sandbox. A full check sets TARDIGRADE_BIN and TARDIGRADE_REQUIRE_TESTS=1."
+          fi
+
