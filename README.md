@@ -4,7 +4,9 @@ Minimal MCP stdio server that lets agents (pi coding agent) run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade), the sandboxed Rust V8
 runtime, and exposes exactly one tool, `run_js`: the code goes to a temp file
 and runs as `tardigrade --sandbox [--clock=virtual] --seed=N --timeout=MS <file>` inside a
-Landlock + seccomp caged process with a RAM-only filesystem and no host APIs.
+Landlock + seccomp caged process with a RAM-only filesystem. It has no host
+handles: no `require`, no `process`, no `fetch`, no filesystem or environment
+access. The one timer primitive, `setTimeout`, is driven by a virtual clock.
 
 ## Limits and fail-closed behavior
 
@@ -15,6 +17,12 @@ Landlock + seccomp caged process with a RAM-only filesystem and no host APIs.
   tardigrade's own `--timeout` watchdog *and* enforced by this parent, which
   SIGKILLs the child after a 500 ms grace — so the guest's clean exit 124
   wins when it can, and a stuck child still dies on time.
+- **Virtual time:** with the default `clock: "virtual"`, time is frozen while
+  the script runs synchronously and then jumps to the next scheduled timer, so
+  `setTimeout(f, 3_600_000)` completes in milliseconds of wall time and the
+  clock still advances by an hour. `clock: "real"` uses wall-clock time
+  instead. Timers cannot buy a run more time: a self-rescheduling timer chain
+  still ends at `timeout_ms` with exit 124.
 - **Memory cap:** runs are wrapped in `prlimit --as=<MiB>` (default
   `TARDIGRADE_RUNNER_AS=2048`; note V8 aborts at startup below ~1.3 GiB of
   address space, so smaller caps break every run). If `prlimit` is not on
