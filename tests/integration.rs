@@ -95,3 +95,40 @@ fn chatty_guest_finishes_with_capped_output() {
         result.duration_ms
     );
 }
+
+#[test]
+fn same_seed_gives_identical_output_including_the_virtual_clock() {
+    // The documented default is a virtual clock and seed 0, so two runs must
+    // agree byte for byte, and virtual time starts at the epoch.
+    let Some(runner) = runner() else { return };
+    let code = "console.log(Date.now(), Math.random());";
+    let first = runner.run_js(code, &RunOptions::default()).expect("run");
+    let second = runner.run_js(code, &RunOptions::default()).expect("run");
+    assert_eq!(first.stdout, second.stdout, "seeded runs must not diverge");
+    assert!(
+        first.stdout.starts_with("0 "),
+        "virtual clock should start at the epoch, got {:?}",
+        first.stdout
+    );
+}
+
+#[test]
+fn timer_chain_still_hits_the_deadline() {
+    // A guest that keeps rescheduling timers never lets its event loop drain.
+    // The deadline must still hold, because this parent enforces it and a timer
+    // cannot buy the guest more wall-clock time.
+    let Some(runner) = runner() else { return };
+    let opts = RunOptions {
+        timeout_ms: 300,
+        ..RunOptions::default()
+    };
+    let result = runner
+        .run_js("(function again() { setTimeout(again, 1000); })();", &opts)
+        .expect("run");
+    assert_eq!(result.status, RunStatus::Timeout);
+    assert!(
+        result.duration_ms < 2000,
+        "duration was {} ms",
+        result.duration_ms
+    );
+}
