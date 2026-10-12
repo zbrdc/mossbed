@@ -299,8 +299,6 @@ impl Runner {
         // script: under --sandbox the dump inode is the only file the guest
         // can write, so it must pre-exist as a regular file we own.
         let preload_path = match opts.preload.as_deref() {
-            // Seq-unique names: the script dir is shared by concurrent runs
-            // in this process, so fixed names would collide (File exists).
             Some(json) => Some(write_temp_file(temp_name("preload", "json"), json)?),
             None => None,
         };
