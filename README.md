@@ -1,4 +1,4 @@
-<img src="assets/logo.png" alt="tardigrade-runner" width="320">
+<img src="assets/logo.png" alt="tardigrade-runner" width="235">
 
 # tardigrade-runner
 
