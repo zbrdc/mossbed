@@ -7,10 +7,10 @@
 use std::io::{self, BufRead, Write};
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use tardigrade_runner::{
-    resolve_bin, RunOptions, RunResult, Runner, DRAIN_CAP_BYTES, TRUNCATED_MARKER,
+    DRAIN_CAP_BYTES, RunOptions, RunResult, Runner, TRUNCATED_MARKER, resolve_bin,
 };
 
 #[derive(Deserialize)]

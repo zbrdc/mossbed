@@ -6,7 +6,7 @@
 //! Each test skips with a message when the binary is not found.
 
 use tardigrade_runner::{
-    resolve_bin, RunOptions, RunStatus, Runner, DRAIN_CAP_BYTES, TRUNCATED_MARKER,
+    DRAIN_CAP_BYTES, RunOptions, RunStatus, Runner, TRUNCATED_MARKER, resolve_bin,
 };
 
 fn runner() -> Option<Runner> {
