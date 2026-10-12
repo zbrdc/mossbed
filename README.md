@@ -105,6 +105,16 @@ is absent they print a SKIP line and pass without running anything, so a green
 suite does not by itself prove they ran; set TARDIGRADE_BIN to point at one.
 
 ## Throughput
++A separate boundary suite, tests/sandbox.rs, asserts what a guest is
+prevented from doing: no network (vm.net is inert, seccomp denies socket calls
+with EPERM), no module loading or process creation, host filesystem paths
+invisible rather than merely unreadable, runaway allocation stopped at
+tardigrade's 256 MiB default as a catchable RangeError, WebAssembly executing but
+bounded by the address-space belt, and stack exhaustion caught rather than
+crashing. These document observed behaviour; they are not an attempt to break the
+sandbox, and no fuzzing is involved.
+
+## Throughput
 
 `examples/load` drives the runner directly from N threads, without the MCP line
 protocol in the path:
