@@ -1,3 +1,5 @@
+<img src="assets/logo.png" alt="tardigrade-runner" width="320">
+
 # tardigrade-runner
 
 Minimal MCP stdio server that lets agents (pi coding agent) run generated
