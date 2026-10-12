@@ -1,6 +1,4 @@
-<img src="assets/logo.svg" alt="tardigrade-runner" width="160">
-
-# tardigrade-runner
+# <img src="assets/logo.svg" alt="" width="40" align="middle"> tardigrade-runner
 
 Minimal MCP stdio server that lets agents (pi coding agent) run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade), the sandboxed Rust V8
