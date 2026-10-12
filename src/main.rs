@@ -49,53 +49,56 @@ fn main() {
         if line.trim().is_empty() {
             continue;
         }
-        handle_line(&line, &runner, &gate, &mut stdout);
-        let _ = stdout.flush();
+        // A closed client pipe must end the server, not spin it forever.
+        if handle_line(&line, &runner, &gate, &mut stdout).is_err() || stdout.flush().is_err() {
+            break;
+        }
     }
 }
 
-fn handle_line(line: &str, runner: &Runner, gate: &Result<(), String>, out: &mut impl Write) {
+fn handle_line(
+    line: &str,
+    runner: &Runner,
+    gate: &Result<(), String>,
+    out: &mut impl Write,
+) -> io::Result<()> {
     let msg: Value = match serde_json::from_str(line) {
         Ok(msg) => msg,
         Err(e) => {
-            write_json(
+            return write_json(
                 out,
                 json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": e.to_string()}}),
             );
-            return;
         }
     };
     // Notifications (no id) are ignored.
     let Some(id) = msg.get("id").cloned() else {
-        return;
+        return Ok(());
     };
     let method = msg
         .get("method")
         .and_then(Value::as_str)
         .unwrap_or_default();
     let reply = match method {
-        "initialize" => Ok(initialize(msg.get("params"))),
+        "initialize" => Ok(initialize()),
         "tools/list" => Ok(json!({"tools": [tool_spec()]})),
         "tools/call" => call_tool(msg.get("params"), runner, gate),
         _ => Err((-32601, format!("method not found: {method}"))),
     };
     match reply {
         Ok(result) => write_json(out, json!({"jsonrpc": "2.0", "id": id, "result": result})),
-        Err((code, message)) => {
-            write_json(
-                out,
-                json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
-            );
-        }
+        Err((code, message)) => write_json(
+            out,
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
+        ),
     }
 }
 
-fn initialize(params: Option<&Value>) -> Value {
-    let client_proto = params
-        .and_then(|p| p.get("protocolVersion"))
-        .and_then(Value::as_str);
+fn initialize() -> Value {
     json!({
-        "protocolVersion": client_proto.unwrap_or("2024-11-05"),
+        // Answer with a version this server implements, never echo the
+        // client's proposal (even a bogus future one) verbatim.
+        "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},
         "serverInfo": {"name": "tardigrade-runner", "version": env!("CARGO_PKG_VERSION")},
     })
@@ -174,13 +177,37 @@ fn truncate_str(s: &str) -> String {
     format!("{}{}", &s[..cut], TRUNCATED_MARKER)
 }
 
-fn write_json(out: &mut impl Write, value: Value) {
-    let _ = writeln!(out, "{value}");
+fn write_json(out: &mut impl Write, value: Value) -> io::Result<()> {
+    writeln!(out, "{value}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct BrokenPipe;
+    impl Write for BrokenPipe {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+        }
+    }
+
+    #[test]
+    fn write_errors_reach_the_loop() {
+        let runner = Runner::new(std::path::PathBuf::from("unused")).expect("runner config");
+        let gate: Result<(), String> = Ok(());
+        // Malformed JSON forces the parse-error reply, which must hit the
+        // broken writer and propagate instead of being swallowed.
+        assert!(handle_line("{", &runner, &gate, &mut BrokenPipe).is_err());
+    }
+
+    #[test]
+    fn initialize_answers_supported_protocol_version() {
+        assert_eq!(initialize()["protocolVersion"].as_str(), Some("2024-11-05"));
+    }
 
     #[test]
     fn truncate_cuts_on_char_boundary_and_marks() {
