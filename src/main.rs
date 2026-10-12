@@ -108,7 +108,7 @@ fn tool_spec() -> Value {
     json!({
         "name": "run_js",
         "description": "Run JavaScript in the sandboxed tardigrade V8 runtime (Landlock + seccomp, \
-    RAM filesystem, no host APIs). Returns JSON {status, exit_code, stdout, stderr, duration_ms}.",
+    RAM filesystem, no host APIs). Returns JSON {status, exit_code, stdout, stderr, duration_ms, memory_cap_mb}.",
         "inputSchema": {
             "type": "object",
             "properties": {
