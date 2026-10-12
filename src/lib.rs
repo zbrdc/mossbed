@@ -66,6 +66,9 @@ const MAX_TIMEOUT_MS: u32 = 3_600_000;
 /// Per-stream capture cap while draining a running guest.
 pub const DRAIN_CAP_BYTES: usize = 64 * 1024;
 
+/// Largest end-of-run dump returned inline, in bytes (TARDIGRADE_RUNNER_DUMP_MAX).
+pub const DEFAULT_DUMP_MAX_BYTES: u64 = 1024 * 1024;
+
 /// Appended to a stream whose drain hit [`DRAIN_CAP_BYTES`].
 pub const TRUNCATED_MARKER: &str = "…[truncated]";
 
@@ -169,6 +172,9 @@ pub struct Runner {
     prlimit: Option<PathBuf>,
     as_cap_mb: u64,
     heap_mb: u64,
+    /// Largest dump returned inline; oversize dumps are suppressed with a
+    /// stderr note rather than ballooning an MCP message.
+    dump_max_bytes: u64,
 }
 
 impl Runner {
@@ -185,13 +191,26 @@ impl Runner {
                 .map_err(|e| format!("bad TARDIGRADE_RUNNER_MEM {v:?}: {e} (expected MiB)"))?,
             Err(_) => DEFAULT_HEAP_MB,
         };
+        let dump_max_bytes = match std::env::var("TARDIGRADE_RUNNER_DUMP_MAX") {
+            Ok(v) => v
+                .parse::<u64>()
+                .map_err(|e| format!("bad TARDIGRADE_RUNNER_DUMP_MAX {v:?}: {e} (expected bytes)"))?,
+            Err(_) => DEFAULT_DUMP_MAX_BYTES,
+        };
         Ok(Runner {
             bin,
             sandbox_ok: false,
             prlimit: find_in_path("prlimit"),
             as_cap_mb,
             heap_mb,
+            dump_max_bytes,
         })
+    }
+
+    /// Set the dump cap in bytes. For operators and tests.
+    pub fn with_dump_max(mut self, bytes: u64) -> Runner {
+        self.dump_max_bytes = bytes;
+        self
     }
 
     pub fn bin(&self) -> &Path {
@@ -280,12 +299,14 @@ impl Runner {
         // script: under --sandbox the dump inode is the only file the guest
         // can write, so it must pre-exist as a regular file we own.
         let preload_path = match opts.preload.as_deref() {
-            Some(json) => Some(write_temp_file("preload.json".to_owned(), json)?),
+            // Seq-unique names: the script dir is shared by concurrent runs
+            // in this process, so fixed names would collide (File exists).
+            Some(json) => Some(write_temp_file(temp_name("preload", "json"), json)?),
             None => None,
         };
         let _preload_guard = preload_path.as_deref().map(TempScript);
         let dump_path = if opts.dump {
-            Some(write_temp_file("dump.json".to_owned(), "")?)
+            Some(write_temp_file(temp_name("dump", "json"), "")?)
         } else {
             None
         };
@@ -293,9 +314,17 @@ impl Runner {
         let mut result =
             self.spawn_and_wait(&script, preload_path.as_deref(), dump_path.as_deref(), opts)?;
         if let Some(dump_file) = dump_path.as_deref() {
-            result.dump = fs::read_to_string(dump_file)
-                .ok()
-                .filter(|content| !content.is_empty());
+            let len = fs::metadata(dump_file).map(|m| m.len()).unwrap_or(0);
+            if len > self.dump_max_bytes {
+                result.stderr = format!(
+                    "{}tardigrade-runner: dump suppressed ({} bytes > {} cap); keep handed-off state small or raise TARDIGRADE_RUNNER_DUMP_MAX\n",
+                    result.stderr, len, self.dump_max_bytes
+                );
+            } else {
+                result.dump = fs::read_to_string(dump_file)
+                    .ok()
+                    .filter(|content| !content.is_empty());
+            }
         }
         Ok(result)
     }
@@ -451,6 +480,12 @@ fn script_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Unique temp file name: the script directory is shared by concurrent runs
+/// in this process, so every file it hands out needs its own sequence number.
+fn temp_name(prefix: &str, ext: &str) -> String {
+    let seq = SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}-{seq}.{ext}")
+}
 fn write_temp_script(code: &str) -> Result<PathBuf, String> {
     let seq = SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed);
     write_temp_file(format!("{seq}.js"), code)

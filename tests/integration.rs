@@ -216,3 +216,24 @@ fn invalid_preload_json_is_rejected_before_any_run() {
         "{err}"
     );
 }
+
+#[test]
+fn oversized_dump_is_suppressed_with_a_stderr_note() {
+    // A dump larger than the cap must not balloon the result: suppress it and
+    // say so on stderr, leaving the run's own status and stdout intact.
+    let Some(runner) = runner() else { return };
+    let runner = runner.with_dump_max(64);
+    let code = "vm.fs.write(\"/big.txt\", \"x\".repeat(2048));";
+    let opts = RunOptions {
+        dump: true,
+        ..RunOptions::default()
+    };
+    let result = runner.run_js(code, &opts).expect("run");
+    assert_eq!(result.status, RunStatus::Ok);
+    assert_eq!(result.dump, None);
+    assert!(
+        result.stderr.contains("dump suppressed"),
+        "stderr: {:?}",
+        result.stderr
+    );
+}
