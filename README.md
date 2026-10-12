@@ -104,8 +104,7 @@ answers with. The integration tests exercise the real tardigrade binary. When it
 is absent they print a SKIP line and pass without running anything, so a green
 suite does not by itself prove they ran; set TARDIGRADE_BIN to point at one.
 
-## Throughput
-+A separate boundary suite, tests/sandbox.rs, asserts what a guest is
+A separate boundary suite, tests/sandbox.rs, asserts what a guest is
 prevented from doing: no network (vm.net is inert, seccomp denies socket calls
 with EPERM), no module loading or process creation, host filesystem paths
 invisible rather than merely unreadable, runaway allocation stopped at
