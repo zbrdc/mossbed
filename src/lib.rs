@@ -68,8 +68,9 @@ pub struct RunResult {
     pub stdout: String,
     pub stderr: String,
     pub duration_ms: u128,
-    /// Address-space cap in MiB actually applied; `None` when prlimit is
-    /// missing from PATH and the run proceeded uncapped.
+    /// Address-space cap in MiB actually applied; `None` only when prlimit
+    /// is missing from PATH and `TARDIGRADE_ALLOW_UNCAPPED=1` allowed the
+    /// uncapped run.
     pub memory_cap_mb: Option<u64>,
 }
 
@@ -90,6 +91,14 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
         .find(|p| p.is_file())
+}
+
+/// Fail closed when prlimit is missing: an uncapped guest can exhaust host
+/// memory, so only TARDIGRADE_ALLOW_UNCAPPED=1 explicitly accepts that risk.
+fn uncapped_run_refusal(prlimit_missing: bool, allow_uncapped: bool) -> Option<&'static str> {
+    (prlimit_missing && !allow_uncapped).then_some(
+        "prlimit not found on PATH; refusing uncapped run (set TARDIGRADE_ALLOW_UNCAPPED=1 to override)",
+    )
 }
 
 pub struct Runner {
@@ -151,6 +160,10 @@ impl Runner {
         }
         if opts.clock != "virtual" && opts.clock != "real" {
             return Err(r#"clock must be "virtual" or "real""#.into());
+        }
+        let allow_uncapped = std::env::var("TARDIGRADE_ALLOW_UNCAPPED").as_deref() == Ok("1");
+        if let Some(msg) = uncapped_run_refusal(self.prlimit.is_none(), allow_uncapped) {
+            return Err(msg.to_owned());
         }
         let script = write_temp_script(code)?;
         let result = self.spawn_and_wait(&script, opts);
@@ -295,6 +308,14 @@ fn drain_pipe(pipe: Option<impl Read>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uncapped_runs_refused_only_without_override() {
+        let refused = uncapped_run_refusal(true, false).expect("missing prlimit must refuse");
+        assert!(refused.contains("TARDIGRADE_ALLOW_UNCAPPED=1"));
+        assert_eq!(uncapped_run_refusal(true, true), None);
+        assert_eq!(uncapped_run_refusal(false, false), None);
+    }
 
     #[test]
     fn drain_pipe_caps_at_limit_and_marks() {

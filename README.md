@@ -18,7 +18,8 @@ Landlock + seccomp caged process with a RAM-only filesystem and no host APIs.
 - **Memory cap:** runs are wrapped in `prlimit --as=<MiB>` (default
   `TARDIGRADE_RUNNER_AS=2048`; note V8 aborts at startup below ~1.3 GiB of
   address space, so smaller caps break every run). If `prlimit` is not on
-  PATH the run proceeds uncapped and reports `memory_cap_mb: null`.
+  PATH, `run_js` fails closed with an error; set `TARDIGRADE_ALLOW_UNCAPPED=1`
+  to proceed uncapped, reported honestly as `memory_cap_mb: null`.
 - Result stdout/stderr are captured and truncated to 64 KiB each.
 
 ## Pi hookup
