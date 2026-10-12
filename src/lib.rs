@@ -20,10 +20,8 @@ use serde::{Deserialize, Serialize};
 
 /// Address-space cap (MiB) applied with `prlimit --as`.
 ///
-/// V8 aborts at startup below ~1.3 GiB of address space because it reserves
-/// the pointer-compression cage and the code range up front (verified against
-/// the real binary: `--as=512MiB` dies with "Check failed: Start()").
-/// 2 GiB lets V8 start while still bounding a runaway allocator.
+/// V8 aborts at startup below ~1.3 GiB of address space (measured), so 2 GiB
+/// lets V8 start while still bounding a runaway allocator.
 pub const DEFAULT_AS_CAP_MB: u64 = 2048;
 
 /// Heap and ArrayBuffer cap in MiB, passed to tardigrade as --memory.
@@ -38,22 +36,13 @@ pub const DEFAULT_HEAP_MB: u64 = 256;
 pub const MIN_HEAP_MB: u64 = 8;
 
 /// Depth of guest recursion before V8 raises a catchable RangeError, measured
-/// at roughly 10 500 frames.
-///
-/// This is V8 stack size, chosen by the embedder, so it is not adjustable from
-/// here. Guest code with a recursive descent deeper than that must be made
-/// iterative; the failure is a RangeError the guest can catch rather than a
-/// crash, so the shape of the failure is at least predictable.
+/// at roughly 10 500 frames. Not adjustable here: guest code deeper than this
+/// must be made iterative.
 pub const GUEST_RECURSION_LIMIT_HINT: u32 = 10_500;
 
-/// Address space V8 occupies before any guest byte is allocated.
-///
-/// Measured, not guessed. With this floor at 1400 and a 1024 MiB heap the belt
-/// came to 2424 MiB and the guest still stopped at 816 MiB: V8 held the rest.
-/// 1800 is that measurement with slack, so the heap cap the operator asks for
-/// is the cap that binds, rather than the belt quietly binding first. V8 aborts
-/// at startup below roughly 1.3 GiB, so a floor this high is also a floor for
-/// the default.
+/// Address space V8 occupies before any guest byte is allocated. The belt is
+/// raised to at least this plus the heap cap, so the heap cap the operator
+/// asks for is the one that binds.
 const AS_FLOOR_MB: u64 = 1800;
 
 /// Extra time past the guest's own `--timeout` before the parent SIGKILLs,
@@ -620,9 +609,7 @@ mod tests {
         );
 
         // Cleanup is explicit and process-scoped, not tied to one Runner's Drop:
-        // the directory is shared by every Runner in the process, so a Drop that
-        // removed it would delete it out from under a concurrent run. One empty
-        // directory per server lifetime used to accumulate in /tmp. Both tests
+        // the directory is shared by every Runner in the process. Both tests
         // below share this directory, so they live in one test rather than
         // racing each other.
         cleanup_script_dir();
