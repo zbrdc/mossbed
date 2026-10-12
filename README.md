@@ -100,10 +100,11 @@ error, so the caller can read why.
 Unit tests pin the refusal table, the output cap and its marker, truncation on a
 character boundary, the private directory and file modes, write-error
 propagation through the request loop, and the protocol version the server
-answers with. The four integration tests exercise the real tardigrade binary,
-and skip themselves with a message when it is not on disk.
+answers with. The integration tests exercise the real tardigrade binary. When it
+is absent they print a SKIP line and pass without running anything, so a green
+suite does not by itself prove they ran; set TARDIGRADE_BIN to point at one.
 
-+## Throughput
+## Throughput
 
 `examples/load` drives the runner directly from N threads, without the MCP line
 protocol in the path:
