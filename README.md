@@ -103,6 +103,35 @@ propagation through the request loop, and the protocol version the server
 answers with. The four integration tests exercise the real tardigrade binary,
 and skip themselves with a message when it is not on disk.
 
++## Throughput
+
+`examples/load` drives the runner directly from N threads, without the MCP line
+protocol in the path:
+
+    cargo run --release --example load -- 32 3000
+
+On a 24-core machine, 3000 runs per level, `1+1;` per run:
+
+| threads | runs/s | p50 | p99 |
+|---|---|---|---|
+| 1 | 185 | 5 ms | 10 ms |
+| 8 | 1095 | 5 ms | 10 ms |
+| 32 | 2546 | 11 ms | 19 ms |
+| 64 | 2572 | 23 ms | 49 ms |
+| 256 | 2515 | 76 ms | 259 ms |
+
+Throughput saturates at about 32 concurrent runs and stays flat to 256, where
+the machine is running 21 of its 24 cores busy and every extra worker only adds
+queueing: p50 goes from 11 ms to 76 ms for no gain. Each run costs roughly 8 ms
+of CPU, so the ceiling is cores divided by that. A guest that computes rather
+than merely starting up is slower to serve: the same sweep with a
+1e6-iteration loop peaks at 1028 runs/s.
+
+These numbers price process start plus V8 init, because every run is a fresh
+process and there is no warm path to amortise it over. Long-lived guests cost
+more memory too: roughly 5 MiB transient for a run lasting a few milliseconds,
+around 28 MiB each once a guest lives for a few hundred.
+
 ## Licence
 
 Apache-2.0, see [LICENSE](LICENSE).
