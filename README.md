@@ -93,6 +93,14 @@ capped at 64 KiB and marked `…[truncated]`), `duration_ms`, and `memory_cap_mb
 A refused or failed run is reported as tool-error content rather than a protocol
 error, so the caller can read why.
 
+What an agent receives is smaller than what this server sends. Streams are
+capped at 64 KiB here, but a pi MCP client replaces any reply whose first line
+exceeds 50 KiB with a short prose notice and writes the full text to a file under
+/tmp/pi-mcp-output-*/, so the practical ceiling is about 50 KiB per call. A
+client that expects the JSON shape has to handle that notice, and the notice is
+not JSON. Nothing survives between calls either: no globals, no files, no
+arguments and no stdin, so every call must carry its own input.
+
 ## Tests
 
     cargo test
