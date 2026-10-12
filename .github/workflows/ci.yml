@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [master]
   pull_request:
@@ -33,3 +34,30 @@ jobs:
             echo "::warning::The integration, agent and sandbox suites skipped: no tardigrade binary here, so this run is partial. Those are the suites that test the sandbox. A full check sets TARDIGRADE_BIN and TARDIGRADE_REQUIRE_TESTS=1."
           fi
 
+  full-check:
+    # On demand only, because it needs the tardigrade binary: this job clones
+    # and builds the sibling repository, which downloads a prebuilt V8 and takes
+    # several minutes. The default job above reports those suites as skipped
+    # rather than letting a green run imply the sandbox was tested; this one has
+    # TARDIGRADE_REQUIRE_TESTS set, so a skip fails the job.
+    #
+    # Untested as of 0.1.0: whether tardigrade's V8 dependency builds on a bare
+    # GitHub runner has not been tried. If it does not, publish a prebuilt
+    # tardigrade and download it here instead.
+    if: github.event_name == 'workflow_dispatch'
+    name: full check, V8-backed suites included
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Build the sibling tardigrade
+        run: |
+          git clone --depth 1 https://github.com/zbrdc/tardigrade ../tardigrade
+          cargo build --release --manifest-path ../tardigrade/Cargo.toml
+      - name: Tests, with skipping disabled
+        env:
+          TARDIGRADE_BIN: ${{ github.workspace }}/../tardigrade/target/release/tardigrade
+          TARDIGRADE_REQUIRE_TESTS: "1"
+        run: cargo test
