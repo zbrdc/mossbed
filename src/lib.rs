@@ -43,6 +43,11 @@ pub struct RunOptions {
     pub seed: u32,
     /// `"virtual"` passes tardigrade `--clock=virtual`, `"real"` omits it.
     pub clock: String,
+    /// Start of the Date timeline under a virtual clock, in milliseconds since
+    /// 1970. None keeps tardigrade's default of 0, under which Date.now() is 0
+    /// and dates read as 1970: harmless for arithmetic, silently wrong for
+    /// anything date-dependent, so it is reported back in the result.
+    pub epoch_ms: Option<u64>,
 }
 
 impl Default for RunOptions {
@@ -51,6 +56,7 @@ impl Default for RunOptions {
             timeout_ms: 10_000,
             seed: 0,
             clock: "virtual".to_owned(),
+            epoch_ms: None,
         }
     }
 }
@@ -66,6 +72,10 @@ pub enum RunStatus {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RunResult {
     pub status: RunStatus,
+    /// The clock the guest ran on, and the base of its Date timeline, so a
+    /// caller can tell a virtual 1970 from a real wall-clock run.
+    pub clock: String,
+    pub epoch_ms: Option<u64>,
     /// `None` when the process was killed by a signal (e.g. the parent SIGKILL).
     pub exit_code: Option<i32>,
     pub stdout: String,
@@ -164,6 +174,14 @@ impl Runner {
         if opts.clock != "virtual" && opts.clock != "real" {
             return Err(r#"clock must be "virtual" or "real""#.into());
         }
+        if let Some(epoch) = opts.epoch_ms {
+            if opts.clock != "virtual" {
+                return Err("epoch_ms needs the virtual clock; pass clock = \"virtual\"".into());
+            }
+            if epoch > 8_640_000_000_000_000 {
+                return Err("epoch_ms is past the ECMAScript maximum time value".into());
+            }
+        }
         let allow_uncapped = std::env::var("TARDIGRADE_ALLOW_UNCAPPED").as_deref() == Ok("1");
         if let Some(msg) = uncapped_run_refusal(self.prlimit.is_none(), allow_uncapped) {
             return Err(msg.to_owned());
@@ -202,10 +220,13 @@ impl Runner {
         let stderr = stderr_thread
             .join()
             .map_err(|_| "stderr drain thread panicked".to_owned())?;
+        let stderr = with_abort_note(stderr);
         let (status_kind, exit_code) = classify(status, killed_by_us);
 
         Ok(RunResult {
             status: status_kind,
+            clock: opts.clock.clone(),
+            epoch_ms: opts.epoch_ms,
             exit_code,
             stdout,
             stderr,
@@ -220,6 +241,9 @@ impl Runner {
             guest_args.push("--clock=virtual".to_owned());
         }
         guest_args.push(format!("--seed={}", opts.seed));
+        if let Some(epoch) = opts.epoch_ms {
+            guest_args.push(format!("--epoch={epoch}"));
+        }
         guest_args.push(format!("--timeout={}", opts.timeout_ms));
         guest_args.push(script.to_string_lossy().into_owned());
 
@@ -334,6 +358,20 @@ fn wait_with_deadline(child: &mut Child, deadline: Duration) -> Result<(ExitStat
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// A guest can abort its own process instead of throwing. V8's fatal errors name
+/// the subsystem; where the caller can act on that, append a note, leaving the
+/// original stderr intact above it.
+fn with_abort_note(stderr: String) -> String {
+    let note = if stderr.contains("DateTimePatternGeneratorCache") || stderr.contains("Icu error") {
+        "tardigrade-runner: this is the known ICU bug, not your script. Intl date formatting (Intl.DateTimeFormat, Date.prototype.toLocale*String, resolvedOptions) is missing from this build and aborts the guest. Format dates by hand, and pass clock: real if the current time is needed."
+    } else if stderr.contains("Fatal process out of memory") {
+        "tardigrade-runner: the guest hit a hard memory limit and V8 aborted it. The heap and ArrayBuffer are capped at 256 MiB each by default; exceeding them normally raises a catchable RangeError, so an abort here means V8 ran out of room before guest code could catch the limit."
+    } else {
+        return stderr;
+    };
+    format!("{stderr}\n{note}")
 }
 
 fn classify(status: ExitStatus, killed_by_us: bool) -> (RunStatus, Option<i32>) {

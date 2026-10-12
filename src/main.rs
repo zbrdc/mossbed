@@ -19,6 +19,7 @@ struct RunJsParams {
     timeout_ms: Option<u32>,
     seed: Option<u32>,
     clock: Option<String>,
+    epoch_ms: Option<u64>,
 }
 
 fn main() {
@@ -111,14 +112,19 @@ fn tool_spec() -> Value {
     json!({
         "name": "run_js",
         "description": "Run JavaScript in the sandboxed tardigrade V8 runtime (Landlock + seccomp, \
-    RAM filesystem, no host APIs). Returns JSON {status, exit_code, stdout, stderr, duration_ms, memory_cap_mb}.",
+    RAM filesystem, no host APIs). Time is VIRTUAL by default: Date.now() is 0 and \
+    dates read as 1970, so pass clock: \"real\" for wall-clock time, or epoch_ms \
+    for a fixed base. Returns JSON {status, clock, epoch_ms, exit_code, stdout, \
+    stderr, duration_ms, memory_cap_mb}.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "code": {"type": "string", "description": "JavaScript source to run"},
                 "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
                 "seed": {"type": "integer", "minimum": 0},
-                "clock": {"type": "string", "enum": ["virtual", "real"]}
+                "clock": {"type": "string", "enum": ["virtual", "real"]},
+                "epoch_ms": {"type": "integer", "minimum": 0,
+                    "description": "Start of the Date timeline under a virtual clock, ms since 1970. Needs clock=virtual."}
             },
             "required": ["code"]
         }
@@ -153,6 +159,7 @@ fn call_tool(
         timeout_ms: args.timeout_ms.unwrap_or(defaults.timeout_ms),
         seed: args.seed.unwrap_or(defaults.seed),
         clock: args.clock.unwrap_or(defaults.clock),
+        epoch_ms: args.epoch_ms,
     };
     match runner.run_js(&args.code, &opts) {
         Ok(result) => Ok(json!({

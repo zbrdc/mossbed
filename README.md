@@ -31,15 +31,19 @@ following was measured against the real binary, not read off its source:
 **What works, and what silently misleads.** Measured against the real binary,
 because these are the things an agent gets wrong rather than the things it gets right:
 
-- **Time is virtual by default.** `Date.now()` is `0` and `new Date().toISOString()`
-  is `1970-01-01T00:00:00.000Z` unless the caller passes `clock: "real"`, which
-  gives wall-clock time. Nothing warns you; date arithmetic just comes out 1970.
+- **Time is virtual by default, and says so.** `Date.now()` is `0` and
+  `new Date().toISOString()` is `1970-01-01T00:00:00.000Z`. Every result reports
+  the `clock` and `epoch_ms` it used and the tool description states the default,
+  so the trap is visible before the call rather than after it. For wall-clock time pass
+  `clock: "real"`; to pin a realistic base deterministically pass `epoch_ms`,
+  which keeps a run both dated correctly and reproducible.
 - **Do not call the Intl date APIs.** ICU data is not loaded: `Intl.NumberFormat`
   throws `Internal error. Icu error.`, and `Intl.DateTimeFormat`,
   `Date.prototype.toLocale*String` and `resolvedOptions()` abort the whole guest
   process with a fatal V8 error (exit 133). This runner reports that as an error and
   keeps serving, but the guest is gone. It is a known tardigrade bug, listed in its
-  own KNOWN_BUGS.md.
+  own KNOWN_BUGS.md. The runner appends a note to stderr when it recognises this, so the
+  caller gets the workaround instead of a bare V8 backtrace.
 - **No crypto.** There is no `crypto` and no `SubtleCrypto`. `atob` and `btoa` exist,
   so encoding works and hashing does not.
 - **Recursion stops near 10 500 frames**, and the JS heap and ArrayBuffer are each
@@ -105,11 +109,14 @@ Speaks MCP over stdio, one JSON-RPC object per line, protocol version
 | `timeout_ms` | no | `10000` | `1..=3600000`; one hour is the ceiling |
 | `seed` | no | `0` | passed to tardigrade, for repeatable runs |
 | `clock` | no | `virtual` | `virtual` or `real`; virtual is what makes runs reproducible |
+| `epoch_ms` | no | — | start of the Date timeline under a virtual clock, ms since 1970 |
 
 The result comes back as JSON text: `status` (`ok`, `timeout` or `error`),
-`exit_code` (`null` when a signal killed the run), `stdout` and `stderr` (each
-capped at 64 KiB and marked `…[truncated]`), `duration_ms`, and `memory_cap_mb`
-(`null` only for a run explicitly allowed to go uncapped).
+`clock` and `epoch_ms` (the time base the guest ran on, so a virtual 1970
+is never mistaken for a real date), `exit_code` (`null` when a signal killed
+the run), `stdout` and `stderr` (each capped at 64 KiB and marked
+`…[truncated]`), `duration_ms`, and `memory_cap_mb` (`null` only for a
+run explicitly allowed to go uncapped).
 
 A refused or failed run is reported as tool-error content rather than a protocol
 error, so the caller can read why.

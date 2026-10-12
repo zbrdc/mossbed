@@ -166,3 +166,104 @@ fn a_guest_abort_is_contained_and_the_runner_keeps_serving() {
     assert_eq!(after.status, RunStatus::Ok);
     assert_eq!(after.stdout.trim(), "42");
 }
+
+/// The virtual clock is not silent any more: the result says which clock ran and
+/// what its Date timeline started at. epoch_ms pins a realistic base without
+/// giving up reproducibility, and clock real reaches wall-clock time.
+#[test]
+fn the_time_base_is_reported_and_controllable() {
+    let Some(runner) = runner() else { return };
+
+    let default = runner
+        .run_js("console.log(Date.now());", &RunOptions::default())
+        .expect("run");
+    assert_eq!(default.clock, "virtual");
+    assert_eq!(default.epoch_ms, None);
+    assert_eq!(
+        default.stdout.trim(),
+        "0",
+        "virtual time starts at the epoch"
+    );
+
+    let pinned = runner
+        .run_js(
+            "console.log(new Date().toISOString());",
+            &RunOptions {
+                epoch_ms: Some(1_791_763_200_000),
+                ..RunOptions::default()
+            },
+        )
+        .expect("run");
+    assert_eq!(pinned.epoch_ms, Some(1_791_763_200_000));
+    assert_eq!(pinned.stdout.trim(), "2026-10-12T00:00:00.000Z");
+
+    let real = runner
+        .run_js(
+            "console.log(Date.now() > 1700000000000);",
+            &RunOptions {
+                clock: "real".to_owned(),
+                ..RunOptions::default()
+            },
+        )
+        .expect("run");
+    assert_eq!(real.stdout.trim(), "true", "real time is wall-clock");
+}
+
+/// epoch_ms only means anything under the virtual clock, and past the ECMAScript
+/// maximum it is a usage error, refused before anything is spawned.
+#[test]
+fn epoch_ms_is_validated_before_the_guest_starts() {
+    let Some(runner) = runner() else { return };
+    let wrong_clock = runner.run_js(
+        "1+1;",
+        &RunOptions {
+            clock: "real".to_owned(),
+            epoch_ms: Some(5),
+            ..RunOptions::default()
+        },
+    );
+    assert!(
+        wrong_clock.is_err(),
+        "epoch_ms with clock real must be refused"
+    );
+    assert!(wrong_clock.unwrap_err().contains("needs the virtual clock"));
+
+    let too_far = runner.run_js(
+        "1+1;",
+        &RunOptions {
+            epoch_ms: Some(9_007_199_254_740_992),
+            ..RunOptions::default()
+        },
+    );
+    assert!(
+        too_far.is_err(),
+        "past the ECMAScript maximum must be refused"
+    );
+}
+
+/// A V8 abort comes back with an explanation appended, because a bare backtrace
+/// tells an agent nothing it can act on. Ordinary failures are left alone.
+#[test]
+fn an_abort_is_explained_and_ordinary_errors_are_not() {
+    let Some(runner) = runner() else { return };
+    let aborted = runner
+        .run_js(
+            r#"console.log(new Intl.DateTimeFormat("en-GB").format(new Date(0)));"#,
+            &RunOptions::default(),
+        )
+        .expect("run");
+    assert!(
+        aborted.stderr.contains("known ICU bug"),
+        "an abort must be explained, stderr was {:?}",
+        aborted.stderr
+    );
+
+    let syntax = runner
+        .run_js("const x = ;", &RunOptions::default())
+        .expect("run");
+    assert!(
+        syntax.stderr.contains("SyntaxError") && !syntax.stderr.contains("known ICU bug"),
+        "ordinary errors keep their own trace, stderr was {:?}",
+        syntax.stderr
+    );
+}
