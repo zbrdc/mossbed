@@ -6,10 +6,9 @@ use std::io::{self, BufRead, Write};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use tardigrade_runner::{resolve_bin, RunOptions, RunResult, Runner};
-
-/// Per-stream output cap in the tool result.
-const TRUNCATE_BYTES: usize = 64 * 1024;
+use tardigrade_runner::{
+    resolve_bin, RunOptions, RunResult, Runner, DRAIN_CAP_BYTES, TRUNCATED_MARKER,
+};
 
 #[derive(Deserialize)]
 struct RunJsParams {
@@ -162,14 +161,14 @@ fn truncate(mut result: RunResult) -> RunResult {
 }
 
 fn truncate_str(s: &str) -> String {
-    if s.len() <= TRUNCATE_BYTES {
+    if s.len() <= DRAIN_CAP_BYTES {
         return s.to_owned();
     }
-    let mut cut = TRUNCATE_BYTES;
+    let mut cut = DRAIN_CAP_BYTES;
     while !s.is_char_boundary(cut) {
         cut -= 1;
     }
-    format!("{}…[truncated]", &s[..cut])
+    format!("{}{}", &s[..cut], TRUNCATED_MARKER)
 }
 
 fn write_json(out: &mut impl Write, value: Value) {
@@ -185,9 +184,9 @@ mod tests {
         // 70_000 'é' bytes = 140_000 bytes, boundary is not a char edge.
         let long = "é".repeat(70_000);
         let cut = truncate_str(&long);
-        assert_eq!(cut.len(), TRUNCATE_BYTES + "…[truncated]".len());
-        assert!(cut.ends_with("…[truncated]"));
-        let short = "x".repeat(TRUNCATE_BYTES);
+        assert_eq!(cut.len(), DRAIN_CAP_BYTES + TRUNCATED_MARKER.len());
+        assert!(cut.ends_with(TRUNCATED_MARKER));
+        let short = "x".repeat(DRAIN_CAP_BYTES);
         assert_eq!(truncate_str(&short), short);
     }
 }

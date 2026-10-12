@@ -28,6 +28,12 @@ const KILL_GRACE_MS: u64 = 500;
 /// A run must always be bounded from the parent side; one hour is plenty.
 const MAX_TIMEOUT_MS: u32 = 3_600_000;
 
+/// Per-stream capture cap while draining a running guest.
+pub const DRAIN_CAP_BYTES: usize = 64 * 1024;
+
+/// Appended to a stream whose drain hit [`DRAIN_CAP_BYTES`].
+pub const TRUNCATED_MARKER: &str = "…[truncated]";
+
 #[derive(Debug)]
 pub struct RunOptions {
     pub timeout_ms: u32,
@@ -162,13 +168,25 @@ impl Runner {
             .spawn()
             .map_err(|e| format!("cannot spawn tardigrade: {e}"))?;
 
+        // Drain while the child runs: a guest that out-prints the kernel pipe
+        // buffer would otherwise block on write, defeat its own watchdog, and
+        // get SIGKILLed as a "timeout" with all output lost.
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+        let stdout_thread = std::thread::spawn(move || drain_pipe(stdout_pipe));
+        let stderr_thread = std::thread::spawn(move || drain_pipe(stderr_pipe));
+
         // The guest's own --timeout (same value) fires first; the parent only
         // SIGKILLs after a grace period, for the cases the guest watchdog
-        // cannot stop (a write blocked on a full pipe, a stuck thread).
+        // cannot stop (a stuck thread).
         let deadline = Duration::from_millis(u64::from(opts.timeout_ms) + KILL_GRACE_MS);
         let (status, killed_by_us) = wait_with_deadline(&mut child, deadline)?;
-        let stdout = read_pipe(child.stdout.take());
-        let stderr = read_pipe(child.stderr.take());
+        let stdout = stdout_thread
+            .join()
+            .map_err(|_| "stdout drain thread panicked".to_owned())?;
+        let stderr = stderr_thread
+            .join()
+            .map_err(|_| "stderr drain thread panicked".to_owned())?;
         let (status_kind, exit_code) = classify(status, killed_by_us);
 
         Ok(RunResult {
@@ -252,11 +270,41 @@ fn classify(status: ExitStatus, killed_by_us: bool) -> (RunStatus, Option<i32>) 
     }
 }
 
-fn read_pipe(pipe: Option<impl Read>) -> String {
+fn drain_pipe(pipe: Option<impl Read>) -> String {
     let Some(mut pipe) = pipe else {
         return String::new();
     };
-    let mut buf = Vec::new();
-    let _ = pipe.read_to_end(&mut buf);
+    let mut buf = Vec::with_capacity(DRAIN_CAP_BYTES);
+    let mut chunk = [0u8; 8192];
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        }
+        if buf.len() >= DRAIN_CAP_BYTES {
+            // Cap hit: returning drops the pipe (closing it), so a chatty
+            // guest's next write fails instead of blocking forever on a full
+            // kernel pipe buffer.
+            buf.truncate(DRAIN_CAP_BYTES);
+            return String::from_utf8_lossy(&buf).into_owned() + TRUNCATED_MARKER;
+        }
+    }
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drain_pipe_caps_at_limit_and_marks() {
+        use std::io::Cursor;
+        let long = drain_pipe(Some(Cursor::new(vec![b'x'; DRAIN_CAP_BYTES + 4096])));
+        assert_eq!(long.len(), DRAIN_CAP_BYTES + TRUNCATED_MARKER.len());
+        assert!(long.ends_with(TRUNCATED_MARKER));
+
+        let short = drain_pipe(Some(Cursor::new(b"hi".to_vec())));
+        assert_eq!(short, "hi");
+        assert_eq!(drain_pipe(None::<std::io::Empty>), "");
+    }
 }

@@ -2,7 +2,9 @@
 //! ../tardigrade/target/release/tardigrade, or TARDIGRADE_BIN).
 //! Each test skips with a message when the binary is not found.
 
-use tardigrade_runner::{resolve_bin, RunOptions, RunStatus, Runner};
+use tardigrade_runner::{
+    resolve_bin, RunOptions, RunStatus, Runner, DRAIN_CAP_BYTES, TRUNCATED_MARKER,
+};
 
 fn runner() -> Option<Runner> {
     let bin = resolve_bin(None);
@@ -57,6 +59,35 @@ fn infinite_loop_times_out_quickly() {
     assert_eq!(result.status, RunStatus::Timeout);
     assert!(
         result.duration_ms < 2000,
+        "duration was {} ms",
+        result.duration_ms
+    );
+}
+
+#[test]
+fn chatty_guest_finishes_with_capped_output() {
+    // ~1 MiB of output (1024 lines x 1025 bytes), far past one pipe buffer.
+    let Some(runner) = runner() else { return };
+    let code = "const s = \"x\".repeat(1024);\nfor (let i = 0; i < 1024; i++) console.log(s);";
+    let opts = RunOptions {
+        timeout_ms: 10_000,
+        ..RunOptions::default()
+    };
+    let result = runner.run_js(code, &opts).expect("run");
+    assert_eq!(
+        result.status,
+        RunStatus::Ok,
+        "duration {} ms",
+        result.duration_ms
+    );
+    assert_eq!(result.exit_code, Some(0));
+    assert_eq!(
+        result.stdout.len(),
+        DRAIN_CAP_BYTES + TRUNCATED_MARKER.len()
+    );
+    assert!(result.stdout.ends_with(TRUNCATED_MARKER));
+    assert!(
+        result.duration_ms < 5_000,
         "duration was {} ms",
         result.duration_ms
     );
