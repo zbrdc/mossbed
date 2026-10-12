@@ -5,6 +5,10 @@ this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `preload` and `dump`: a run can be handed a RAM-filesystem snapshot to restore before it starts, and can return one afterwards, so a workflow can carry state between runs. Runs stay stateless unless a caller asks.
+
 ## [0.1.0] - 2026-10-12
 
 First release.

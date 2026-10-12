@@ -164,3 +164,55 @@ console.log(JSON.stringify(banned.filter((n) => typeof globalThis[n] !== "undefi
         result.stdout
     );
 }
+
+#[test]
+fn dump_then_preload_hands_state_between_runs() {
+    // The agent-loop pattern: run 1 writes state and dumps it; run 2 starts
+    // from an empty RAM fs, preloads that snapshot, and continues the workflow.
+    let Some(runner) = runner() else { return };
+    let opts = RunOptions {
+        dump: true,
+        ..RunOptions::default()
+    };
+    let first = runner
+        .run_js(
+            "vm.fs.write(\"/state.json\", JSON.stringify({ visited: 1 }));",
+            &opts,
+        )
+        .expect("run");
+    assert_eq!(first.status, RunStatus::Ok);
+    let snapshot = first.dump.expect("dump requested and run succeeded");
+    assert!(snapshot.contains("visited"), "snapshot was: {snapshot}");
+
+    let second = runner
+        .run_js(
+            r#"const s = JSON.parse(vm.fs.read("/state.json")); s.visited += 1; vm.fs.write("/state.json", JSON.stringify(s)); console.log("visited", s.visited);"#,
+            &RunOptions {
+                preload: Some(snapshot),
+                ..RunOptions::default()
+            },
+        )
+        .expect("run");
+    assert_eq!(second.status, RunStatus::Ok, "stderr: {:?}", second.stderr);
+    assert!(
+        second.stdout.contains("visited 2"),
+        "stdout: {:?}",
+        second.stdout
+    );
+    // The second run did not request a dump, so none is reported.
+    assert_eq!(second.dump, None);
+}
+
+#[test]
+fn invalid_preload_json_is_rejected_before_any_run() {
+    let Some(runner) = runner() else { return };
+    let opts = RunOptions {
+        preload: Some("not json".into()),
+        ..RunOptions::default()
+    };
+    let err = runner.run_js("1;", &opts).expect_err("must refuse");
+    assert!(
+        err.contains("preload must be a snapshot JSON object"),
+        "{err}"
+    );
+}
