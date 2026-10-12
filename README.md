@@ -1,7 +1,7 @@
 # tardigrade-runner
 
 Minimal MCP stdio server that lets agents (pi coding agent) run generated
-JavaScript safely. It wraps [tardigrade](../tardigrade), the sandboxed Rust V8
+JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade), the sandboxed Rust V8
 runtime, and exposes exactly one tool, `run_js`: the code goes to a temp file
 and runs as `tardigrade --sandbox --clock --seed --timeout <file>` inside a
 Landlock + seccomp caged process with a RAM-only filesystem and no host APIs.
