@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 zbrdc
+
 //! Runs JavaScript in the sandboxed tardigrade V8 runtime.
 //!
 //! `Runner` resolves the tardigrade binary, fail-closes on

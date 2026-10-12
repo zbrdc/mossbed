@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 zbrdc
+
 //! Integration tests against the real tardigrade binary (default
 //! ../tardigrade/target/release/tardigrade, or TARDIGRADE_BIN).
 //! Each test skips with a message when the binary is not found.

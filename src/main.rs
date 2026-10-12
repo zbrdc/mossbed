@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 zbrdc
+
 //! Minimal hand-rolled MCP stdio server: JSON-RPC 2.0, one line per message,
 //! no SDK dependency. Exposes exactly one tool: `run_js`.
 
