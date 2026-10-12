@@ -7,8 +7,14 @@ the job description of a sandbox that has to contain whatever an agent writes.
 
 | File | What it is |
 |---|---|
-| `logo.svg` | The source. One path element, 5 subpaths, 394 points, 6.0 KB, `viewBox 0 0 64 64`. |
-| `logo.png` | 512x512 render of that exact geometry. |
+| `logo.svg` | The source. One path element, 5 subpaths, 394 points, 6.0 KB. Its `viewBox` is cropped tight to the mark with a 6% margin, so the README gets the artwork and nothing else. |
+| `logo.png` | 512x512 square render of the same geometry. The canvas stays square here, so the file also works where a square is expected, an avatar or an icon slot. |
+
+The framing differs on purpose between the two files: a square canvas with the
+mark centred suits round and square placements, while a tight crop suits a
+document. A square `viewBox` on a 1.47:1 mark wastes 43% of its height, which
+shows up as a mark that looks oversized and floats away from the text it sits
+above.
 
 Ink is navy `#182749` on a transparent background.
 
