@@ -4,6 +4,21 @@
 //! ceiling for what the runner can do, not for a client of it.
 //!
 //!     cargo run --release --example load -- <threads> <runs> ["code"]
+//!
+//! Measured on a 24-core machine, 3000 runs per level, `1+1;` per run:
+//!
+//! | threads | runs/s | p50 | p99 |
+//! |---|---|---|---|
+//! | 1 | 185 | 5 ms | 10 ms |
+//! | 8 | 1095 | 5 ms | 10 ms |
+//! | 32 | 2546 | 11 ms | 19 ms |
+//! | 64 | 2572 | 23 ms | 49 ms |
+//! | 256 | 2515 | 76 ms | 259 ms |
+//!
+//! Throughput saturates near 32 concurrent runs. Past that the machine runs 21
+//! of its 24 cores busy and extra workers only add queueing: p50 goes from 11 ms
+//! to 76 ms with no gain. A guest that computes rather than merely starting up is
+//! slower to serve: the same sweep with a 1e6-iteration loop peaks at 1028 runs/s.
 
 use std::env;
 use std::sync::Arc;
