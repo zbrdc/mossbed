@@ -182,3 +182,64 @@ console.log(JSON.stringify({ depth: depth, err: err }));"#,
         result.stdout
     );
 }
+
+/// The heap cap is an operator setting, so it never appears in the tool schema,
+/// and it is reported back. Raising it must also raise the address-space belt:
+/// the belt has to cover the V8 reservations plus the heap, or V8 aborts at
+/// startup instead of the guest being capped.
+#[test]
+fn the_heap_cap_is_reported_and_operator_raisable() {
+    let Some(runner) = runner() else { return };
+    assert_eq!(runner.heap_mb(), 256, "the tardigrade default, stated");
+    let capped = runner
+        .run_js(
+            "const held = []; let n = 0; try { for (; n < 200; n++) held.push(new Uint8Array(16*1024*1024)); } catch (e) {}
+console.log(JSON.stringify({mib: n * 16}));",
+            &RunOptions::default(),
+        )
+        .expect("run");
+    assert_eq!(capped.heap_limit_mb, 256);
+    assert!(
+        capped.stdout.contains("\"mib\":256"),
+        "stdout was {:?}",
+        capped.stdout
+    );
+
+    let roomy = runner.with_heap_mb(1024);
+    let bigger = roomy
+        .run_js(
+            "const held = []; let n = 0; try { for (; n < 200; n++) held.push(new Uint8Array(16*1024*1024)); } catch (e) {}
+console.log(JSON.stringify({mib: n * 16}));",
+            &RunOptions::default(),
+        )
+        .expect("run");
+    assert_eq!(bigger.heap_limit_mb, 1024);
+    assert!(
+        bigger.status == RunStatus::Ok,
+        "the guest must survive: {:?}",
+        bigger.stderr
+    );
+    let mib: u32 = bigger
+        .stdout
+        .split("\"mib\":")
+        .nth(1)
+        .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+        .and_then(|v| v.parse().ok())
+        .expect("mib in output");
+    assert!(
+        mib > 256,
+        "a raised cap must actually allow more, got {} MiB",
+        mib
+    );
+}
+
+/// Tardigrade refuses --memory below 8 MiB, and so does this, before spawning.
+#[test]
+fn a_heap_cap_below_the_minimum_is_refused() {
+    let Some(runner) = runner() else { return };
+    let refused = runner
+        .with_heap_mb(4)
+        .run_js("1+1;", &RunOptions::default());
+    assert!(refused.is_err(), "4 MiB must be refused");
+    assert!(refused.unwrap_err().contains("at least 8"));
+}

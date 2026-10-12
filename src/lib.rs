@@ -24,6 +24,27 @@ use serde::{Deserialize, Serialize};
 /// 2 GiB lets V8 start while still bounding a runaway allocator.
 pub const DEFAULT_AS_CAP_MB: u64 = 2048;
 
+/// Heap and ArrayBuffer cap in MiB, passed to tardigrade as --memory.
+///
+/// The tardigrade default is 256. It is passed explicitly so the effective
+/// cap appears in the result rather than being implied, and it is an operator
+/// setting rather than a tool parameter: a model must not be able to lift its
+/// own ceiling. Raise it with TARDIGRADE_RUNNER_MEM.
+pub const DEFAULT_HEAP_MB: u64 = 256;
+
+/// Tardigrade refuses --memory below this.
+pub const MIN_HEAP_MB: u64 = 8;
+
+/// Address space V8 occupies before any guest byte is allocated.
+///
+/// Measured, not guessed. With this floor at 1400 and a 1024 MiB heap the belt
+/// came to 2424 MiB and the guest still stopped at 816 MiB: V8 held the rest.
+/// 1800 is that measurement with slack, so the heap cap the operator asks for
+/// is the cap that binds, rather than the belt quietly binding first. V8 aborts
+/// at startup below roughly 1.3 GiB, so a floor this high is also a floor for
+/// the default.
+const AS_FLOOR_MB: u64 = 1800;
+
 /// Extra time past the guest's own `--timeout` before the parent SIGKILLs,
 /// so tardigrade's clean exit 124 usually wins over a raw kill.
 const KILL_GRACE_MS: u64 = 500;
@@ -85,6 +106,8 @@ pub struct RunResult {
     /// is missing from PATH and `TARDIGRADE_ALLOW_UNCAPPED=1` allowed the
     /// uncapped run.
     pub memory_cap_mb: Option<u64>,
+    /// Heap and ArrayBuffer cap in MiB passed to tardigrade.
+    pub heap_limit_mb: u64,
 }
 
 /// Resolves the tardigrade binary: `TARDIGRADE_BIN` env, else the
@@ -120,6 +143,7 @@ pub struct Runner {
     sandbox_ok: bool,
     prlimit: Option<PathBuf>,
     as_cap_mb: u64,
+    heap_mb: u64,
 }
 
 impl Runner {
@@ -130,16 +154,41 @@ impl Runner {
                 .map_err(|e| format!("bad TARDIGRADE_RUNNER_AS {v:?}: {e} (expected MiB)"))?,
             Err(_) => DEFAULT_AS_CAP_MB,
         };
+        let heap_mb = match std::env::var("TARDIGRADE_RUNNER_MEM") {
+            Ok(v) => v
+                .parse::<u64>()
+                .map_err(|e| format!("bad TARDIGRADE_RUNNER_MEM {v:?}: {e} (expected MiB)"))?,
+            Err(_) => DEFAULT_HEAP_MB,
+        };
         Ok(Runner {
             bin,
             sandbox_ok: false,
             prlimit: find_in_path("prlimit"),
             as_cap_mb,
+            heap_mb,
         })
     }
 
     pub fn bin(&self) -> &Path {
         &self.bin
+    }
+
+    /// Heap and ArrayBuffer cap in MiB this runner will apply.
+    pub fn heap_mb(&self) -> u64 {
+        self.heap_mb
+    }
+
+    /// Set the heap cap. For operators and tests; the server reads
+    /// TARDIGRADE_RUNNER_MEM instead.
+    pub fn with_heap_mb(mut self, mb: u64) -> Runner {
+        self.heap_mb = mb;
+        self
+    }
+
+    /// The address-space belt actually applied: the configured cap, raised
+    /// when needed to cover the V8 reservations plus the heap cap.
+    fn effective_as_mb(&self) -> u64 {
+        self.as_cap_mb.max(self.heap_mb + AS_FLOOR_MB)
     }
 
     /// Fail-closed gate: `run_js` refuses everything unless this returned `Ok`.
@@ -170,6 +219,9 @@ impl Runner {
         }
         if opts.timeout_ms == 0 || opts.timeout_ms > MAX_TIMEOUT_MS {
             return Err(format!("timeout_ms must be in 1..={MAX_TIMEOUT_MS}"));
+        }
+        if self.heap_mb < MIN_HEAP_MB {
+            return Err(format!("heap_mb must be at least {MIN_HEAP_MB}"));
         }
         if opts.clock != "virtual" && opts.clock != "real" {
             return Err(r#"clock must be "virtual" or "real""#.into());
@@ -231,7 +283,8 @@ impl Runner {
             stdout,
             stderr,
             duration_ms: start.elapsed().as_millis(),
-            memory_cap_mb: self.prlimit.is_some().then_some(self.as_cap_mb),
+            memory_cap_mb: self.prlimit.is_some().then_some(self.effective_as_mb()),
+            heap_limit_mb: self.heap_mb,
         })
     }
 
@@ -244,6 +297,7 @@ impl Runner {
         if let Some(epoch) = opts.epoch_ms {
             guest_args.push(format!("--epoch={epoch}"));
         }
+        guest_args.push(format!("--memory={}", self.heap_mb));
         guest_args.push(format!("--timeout={}", opts.timeout_ms));
         guest_args.push(script.to_string_lossy().into_owned());
 
@@ -251,7 +305,7 @@ impl Runner {
             Some(prlimit) => {
                 let mut cmd = Command::new(prlimit);
                 // `--` keeps prlimit from parsing tardigrade's own flags.
-                cmd.arg(format!("--as={}", self.as_cap_mb * 1024 * 1024));
+                cmd.arg(format!("--as={}", self.effective_as_mb() * 1024 * 1024));
                 cmd.arg("--").arg(&self.bin).args(&guest_args);
                 cmd
             }

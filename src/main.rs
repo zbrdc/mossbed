@@ -115,7 +115,7 @@ fn tool_spec() -> Value {
     RAM filesystem, no host APIs). Time is VIRTUAL by default: Date.now() is 0 and \
     dates read as 1970, so pass clock: \"real\" for wall-clock time, or epoch_ms \
     for a fixed base. Returns JSON {status, clock, epoch_ms, exit_code, stdout, \
-    stderr, duration_ms, memory_cap_mb}.",
+    stderr, duration_ms, memory_cap_mb, heap_limit_mb}.",
         "inputSchema": {
             "type": "object",
             "properties": {
