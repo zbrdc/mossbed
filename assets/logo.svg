@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- tardigrade-runner mark - Copyright 2026 zbrdc - Apache-2.0
      Monochrome, icon-only: one ink colour, no lettering, no gradient,
-     no ornament. The body is a container; the band across it is the lid
-     seam and, on close inspection, a cage slot. All internal detail is
-     negative space, so no background colour is baked in and the silhouette
-     still reads once the detail vanishes at favicon size.
+     no ornament. The body is squared off into four segments whose seams are
+     negative space: a container at a glance, a water bear on a closer look.
+     All detail is negative space, so no background colour is baked in and the
+     silhouette still reads once that detail vanishes at favicon size.
      Traced from the generated artwork, simplified to 166 points.
      To follow the surrounding text colour instead of the brand navy,
      delete the color attribute on the root element. -->
