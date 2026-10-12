@@ -285,7 +285,6 @@ fn hashing_is_possible_without_a_crypto_api() {
         "the abc SHA-256 vector, stdout was {:?}",
         result.stdout
     );
-    // and a MiB of input completes well inside the default deadline
     assert!(
         result.duration_ms < 10_000,
         "hashing a MiB took {} ms",

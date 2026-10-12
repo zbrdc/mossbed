@@ -199,7 +199,6 @@ fn dump_then_preload_hands_state_between_runs() {
         "stdout: {:?}",
         second.stdout
     );
-    // The second run did not request a dump, so none is reported.
     assert_eq!(second.dump, None);
 }
 
