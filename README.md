@@ -9,50 +9,23 @@ described under [The guest environment](#the-guest-environment).
 
 ## The guest environment
 
-The guest's globals are plain ECMAScript plus a small deliberate surface:
-`console`, `setTimeout`/`setInterval`/`clearTimeout`/`clearInterval`,
-`TextEncoder`/`TextDecoder`, `atob`/`btoa`, `structuredClone`,
-`performance`, `WebAssembly`, and tardigrade's own `vm` object. All of the
-following was measured against the real binary, not read off its source:
+The guest surface is tardigrade's and tardigrade documents it: GUEST-API.md
+for the globals and the vm object, OPTIONS.md for the caps, SANDBOX.md for
+what --sandbox denies, KNOWN_BUGS.md for what is broken. Read those rather
+than a second-hand summary here, which would only drift.
 
-- No `require`, `process`, `fetch`, `Deno`, `Bun`, `XMLHttpRequest`,
-  `WebSocket` or `Buffer`.
-- `vm.fs` is a working filesystem API — `read`, `readBytes`, `write`,
-  `list`, `remove`, `mkdir`, `exists`, `stat`, `readdir`, `rename` — but
-  it reaches the guest's own RAM filesystem and nothing else. A file written at
-  `/probe.txt` reads back during that run and `list("/")` shows it; the next
-  run starts with an empty root. The host's filesystem is invisible:
-  `vm.fs.exists("/etc/hostname")` is `false`. Paths must be absolute.
-- `vm` also carries `net` (`port`, `listen`, `send`, `close`), `stdin`,
-  `args`, `exit`, `snapshot`, `restore`, `run` and `version`. This server
-  passes the guest no arguments and no stdin. `vm.net` is unused by this server
-  and is not covered by its tests.
+What this server decides, and therefore does belong here:
 
-**What works, and what silently misleads.** Measured against the real binary,
-because these are the things an agent gets wrong rather than the things it gets right:
-
-- **Time is virtual by default, and says so.** `Date.now()` is `0` and
-  `new Date().toISOString()` is `1970-01-01T00:00:00.000Z`. Every result reports
-  the `clock` and `epoch_ms` it used and the tool description states the default,
-  so the trap is visible before the call rather than after it. For wall-clock time pass
-  `clock: "real"`; to pin a realistic base deterministically pass `epoch_ms`,
-  which keeps a run both dated correctly and reproducible.
-- **Do not call the Intl date APIs.** ICU data is not loaded: `Intl.NumberFormat`
-  throws `Internal error. Icu error.`, and `Intl.DateTimeFormat`,
-  `Date.prototype.toLocale*String` and `resolvedOptions()` abort the whole guest
-  process with a fatal V8 error (exit 133). This runner reports that as an error and
-  keeps serving, but the guest is gone. It is a known tardigrade bug, listed in its
-  own KNOWN_BUGS.md. The runner appends a note to stderr when it recognises this, so the
-  caller gets the workaround instead of a bare V8 backtrace.
-- **No crypto.** There is no `crypto` and no `SubtleCrypto`. `atob` and `btoa` exist,
-  so encoding works and hashing does not.
-- **Recursion stops near 10 500 frames**, and the JS heap and ArrayBuffer are each
-  capped at 256 MiB. Both arrive as catchable `RangeError`s, several times below the
-  2 GiB address-space belt.
-- **Plenty is fast enough for real work**: a 12 MB JSON document parses in ~200 ms, a
-  100 MB string can be built, a million floats sort in ~50 ms, a 5 MB regex scan takes
-  ~90 ms, and `BigInt`, `TextEncoder`, `structuredClone` and WebAssembly all work.
-
+- **It always passes --sandbox,** so the cage SANDBOX.md describes applies to
+  every run, and a platform that cannot provide it is refused rather than run
+  unconfined.
+- **It passes no --serve, no guest arguments and no stdin,** so vm.net has no
+  listener attached, and vm.args and vm.stdin are empty.
+- **It reports the clock and epoch it used** and accepts epoch_ms, so a
+  virtual 1970 is never mistaken for a real date and a run can be pinned to a
+  realistic time without giving up reproducibility.
+- **It explains a recognised V8 abort** by appending a note to stderr, so the
+  caller gets the workaround instead of a bare backtrace.
 ## Limits and fail-closed behavior
 
 - **Fail closed:** at startup the server runs `tardigrade --sandbox-check` and
