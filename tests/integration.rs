@@ -132,3 +132,48 @@ fn timer_chain_still_hits_the_deadline() {
         result.duration_ms
     );
 }
+
+#[test]
+fn guest_filesystem_is_ephemeral_and_never_the_hosts() {
+    // The README claims vm.fs is a RAM filesystem: writable in a run, gone
+    // afterwards, and unable to see the host's filesystem at all.
+    let Some(runner) = runner() else { return };
+    let code = r#"let wrote = false, readBack = null, hostVisible = true;
+try { vm.fs.write("/probe.txt", "hello"); wrote = true; readBack = String(vm.fs.read("/probe.txt")); } catch (e) {}
+try { hostVisible = vm.fs.exists("/etc/hostname"); } catch (e) { hostVisible = "threw"; }
+console.log(JSON.stringify({ wrote: wrote, readBack: readBack, hostVisible: hostVisible }));"#;
+    let first = runner.run_js(code, &RunOptions::default()).expect("run");
+    assert!(
+        first.stdout.contains(r#""wrote":true"#)
+            && first.stdout.contains(r#""readBack":"hello""#)
+            && first.stdout.contains(r#""hostVisible":false"#),
+        "stdout was {:?}",
+        first.stdout
+    );
+
+    let second = runner
+        .run_js(
+            r#"console.log(JSON.stringify({ stillThere: vm.fs.exists("/probe.txt") }));"#,
+            &RunOptions::default(),
+        )
+        .expect("run");
+    assert!(
+        second.stdout.contains(r#""stillThere":false"#),
+        "a file must not survive into the next run, stdout was {:?}",
+        second.stdout
+    );
+}
+
+#[test]
+fn guest_has_no_node_or_browser_escape_hatches() {
+    let Some(runner) = runner() else { return };
+    let code = r#"const banned = ["require", "process", "fetch", "Deno", "Bun", "XMLHttpRequest", "WebSocket", "Buffer"];
+console.log(JSON.stringify(banned.filter((n) => typeof globalThis[n] !== "undefined")));"#;
+    let result = runner.run_js(code, &RunOptions::default()).expect("run");
+    assert_eq!(
+        result.stdout.trim(),
+        "[]",
+        "unexpected host globals reachable: {:?}",
+        result.stdout
+    );
+}
