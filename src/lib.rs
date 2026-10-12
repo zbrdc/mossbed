@@ -8,7 +8,7 @@
 //! parent-enforced hard deadline plus a `prlimit --as` address-space cap.
 
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -169,9 +169,8 @@ impl Runner {
             return Err(msg.to_owned());
         }
         let script = write_temp_script(code)?;
-        let result = self.spawn_and_wait(&script, opts);
-        let _ = fs::remove_file(&script);
-        result
+        let _guard = TempScript(&script);
+        self.spawn_and_wait(&script, opts)
     }
 
     fn spawn_and_wait(&self, script: &Path, opts: &RunOptions) -> Result<RunResult, String> {
@@ -243,14 +242,57 @@ impl Runner {
 
 static SCRIPT_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// Best-effort cleanup: Drop removes the guest script even on panic or an
+/// early return between writing it and the run finishing.
+struct TempScript<'a>(&'a Path);
+
+impl Drop for TempScript<'_> {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(self.0);
+    }
+}
+
+/// 0700 + atomic mkdir closes the /tmp symlink hole: a private dir only we
+/// can enter means a pre-planted symlink can never redirect our writes.
+/// chmod also proves we own a pre-existing dir (mkdir returned EEXIST).
+fn script_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join(format!("tardigrade-runner-{}", std::process::id()));
+    match fs::create_dir(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let meta = fs::symlink_metadata(&dir)
+                .map_err(|e| format!("cannot inspect {}: {e}", dir.display()))?;
+            if !meta.is_dir() {
+                return Err(format!("{} exists but is not a directory", dir.display()));
+            }
+        }
+        Err(e) => return Err(format!("cannot create {}: {e}", dir.display())),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("cannot chmod {} to 0700: {e} (not ours?)", dir.display()))?;
+    }
+    Ok(dir)
+}
+
 fn write_temp_script(code: &str) -> Result<PathBuf, String> {
     let seq = SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "tardigrade-runner-{}-{}.js",
-        std::process::id(),
-        seq
-    ));
-    fs::write(&path, code).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    let path = script_dir()?.join(format!("{seq}.js"));
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // 0600: guest code may embed secrets; only this uid may read it.
+        opts.mode(0o600);
+    }
+    let mut file = opts
+        .open(&path)
+        .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
+    file.write_all(code.as_bytes())
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
 }
 
@@ -318,6 +360,36 @@ mod tests {
         assert!(refused.contains("TARDIGRADE_ALLOW_UNCAPPED=1"));
         assert_eq!(uncapped_run_refusal(true, true), None);
         assert_eq!(uncapped_run_refusal(false, false), None);
+    }
+
+    #[test]
+    fn temp_script_lives_in_private_dir_with_tight_modes() {
+        let script = write_temp_script("console.log(1);").expect("write temp script");
+        let dir = std::env::temp_dir().join(format!("tardigrade-runner-{}", std::process::id()));
+        assert!(
+            script.starts_with(&dir),
+            "script {:?} not inside {dir:?}",
+            script
+        );
+        let dir_meta = fs::metadata(&dir).expect("dir metadata");
+        assert!(dir_meta.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(dir_meta.permissions().mode() & 0o777, 0o700);
+            assert_eq!(
+                fs::metadata(&script)
+                    .expect("script mode")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        assert_eq!(fs::read_to_string(&script).unwrap(), "console.log(1);");
+        drop(TempScript(&script));
+        assert!(!script.exists(), "guard must remove the script");
+        assert!(dir.exists(), "per-process dir stays for reuse");
     }
 
     #[test]
