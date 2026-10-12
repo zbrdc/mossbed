@@ -7,6 +7,8 @@
 //! `tardigrade --sandbox-check`, and executes guest code under a
 //! parent-enforced hard deadline plus a `prlimit --as` address-space cap.
 
+#![forbid(unsafe_code)]
+
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -34,6 +36,15 @@ pub const DEFAULT_HEAP_MB: u64 = 256;
 
 /// Tardigrade refuses --memory below this.
 pub const MIN_HEAP_MB: u64 = 8;
+
+/// Depth of guest recursion before V8 raises a catchable RangeError, measured
+/// at roughly 10 500 frames.
+///
+/// This is V8 stack size, chosen by the embedder, so it is not adjustable from
+/// here. Guest code with a recursive descent deeper than that must be made
+/// iterative; the failure is a RangeError the guest can catch rather than a
+/// crash, so the shape of the failure is at least predictable.
+pub const GUEST_RECURSION_LIMIT_HINT: u32 = 10_500;
 
 /// Address space V8 occupies before any guest byte is allocated.
 ///

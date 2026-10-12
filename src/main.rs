@@ -4,6 +4,8 @@
 //! Minimal hand-rolled MCP stdio server: JSON-RPC 2.0, one line per message,
 //! no SDK dependency. Exposes exactly one tool: `run_js`.
 
+#![forbid(unsafe_code)]
+
 use std::io::{self, BufRead, Write};
 
 use serde::Deserialize;

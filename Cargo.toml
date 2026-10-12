@@ -1,6 +1,9 @@
 [package]
 name = "tardigrade-runner"
 version = "0.1.0"
+description = "MCP stdio server that runs generated JavaScript in the sandboxed tardigrade V8 runtime"
+repository = "https://github.com/zbrdc/tardigrade-runner"
+readme = "README.md"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
