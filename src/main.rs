@@ -22,6 +22,8 @@ struct RunJsParams {
     seed: Option<u32>,
     clock: Option<String>,
     epoch_ms: Option<u64>,
+    preload: Option<String>,
+    dump: Option<bool>,
 }
 
 fn main() {
@@ -116,8 +118,11 @@ fn tool_spec() -> Value {
         "description": "Run JavaScript in the sandboxed tardigrade V8 runtime (Landlock + seccomp, \
     RAM filesystem, no host APIs). Time is VIRTUAL by default: Date.now() is 0 and \
     dates read as 1970, so pass clock: \"real\" for wall-clock time, or epoch_ms \
-    for a fixed base. Returns JSON {status, clock, epoch_ms, exit_code, stdout, \
-    stderr, duration_ms, memory_cap_mb, heap_limit_mb}.",
+    for a fixed base. Runs are stateless unless you pass preload/dump: dump returns \
+    the RAM filesystem as snapshot JSON in the result's dump field, and preload \
+    restores a snapshot before the run, so a workflow can hand state between runs. \
+    Returns JSON {status, clock, epoch_ms, exit_code, stdout, stderr, duration_ms, \
+    memory_cap_mb, heap_limit_mb, dump?}.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -126,7 +131,11 @@ fn tool_spec() -> Value {
                 "seed": {"type": "integer", "minimum": 0},
                 "clock": {"type": "string", "enum": ["virtual", "real"]},
                 "epoch_ms": {"type": "integer", "minimum": 0,
-                    "description": "Start of the Date timeline under a virtual clock, ms since 1970. Needs clock=virtual."}
+                    "description": "Start of the Date timeline under a virtual clock, ms since 1970. Needs clock=virtual."},
+                "preload": {"type": "string",
+                    "description": "Snapshot JSON restored into the RAM filesystem before the run. Merge semantics: snapshot entries overwrite, entries not in the snapshot stay. Use the dump field of an earlier run."},
+                "dump": {"type": "boolean",
+                    "description": "Capture the RAM filesystem at end of run and return it as the result's dump field (snapshot JSON). Feed it back as preload to continue a workflow."}
             },
             "required": ["code"]
         }
@@ -162,6 +171,8 @@ fn call_tool(
         seed: args.seed.unwrap_or(defaults.seed),
         clock: args.clock.unwrap_or(defaults.clock),
         epoch_ms: args.epoch_ms,
+        preload: args.preload,
+        dump: args.dump.unwrap_or(false),
     };
     match runner.run_js(&args.code, &opts) {
         Ok(result) => Ok(json!({

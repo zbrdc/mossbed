@@ -5,7 +5,7 @@
      curves. Bold uniform-width outline, flat single ink colour, no fill,
      no gradient, no lettering, no ornament.
 
-     Two structural rules, each of which was a bug here once:
+     Two structural rules to keep when editing this file:
      - Every contour is a subpath of ONE path element. Split across several
        paths, fill-rule evenodd fills the holes instead of cancelling them,
        because the rule only applies within a single path element.

@@ -80,6 +80,14 @@ pub struct RunOptions {
     /// and dates read as 1970: harmless for arithmetic, silently wrong for
     /// anything date-dependent, so it is reported back in the result.
     pub epoch_ms: Option<u64>,
+    /// Snapshot JSON restored into the RAM filesystem before the guest starts
+    /// (tardigrade --preload). Merge semantics: snapshot entries overwrite,
+    /// entries the snapshot does not mention are kept.
+    pub preload: Option<String>,
+    /// Capture the RAM filesystem at the end of the run (tardigrade --dump)
+    /// and return it as RunResult::dump, so a caller can hand it to a later
+    /// run's preload.
+    pub dump: bool,
 }
 
 impl Default for RunOptions {
@@ -89,6 +97,8 @@ impl Default for RunOptions {
             seed: 0,
             clock: "virtual".to_owned(),
             epoch_ms: None,
+            preload: None,
+            dump: false,
         }
     }
 }
@@ -119,6 +129,10 @@ pub struct RunResult {
     pub memory_cap_mb: Option<u64>,
     /// Heap and ArrayBuffer cap in MiB passed to tardigrade.
     pub heap_limit_mb: u64,
+    /// End-of-run filesystem snapshot when dump was requested and the run
+    /// wrote one; None otherwise (dump not requested, or the run ended before
+    /// any state existed). Feed it back as preload to continue a workflow.
+    pub dump: Option<String>,
 }
 
 /// Resolves the tardigrade binary: `TARDIGRADE_BIN` env, else the
@@ -245,19 +259,57 @@ impl Runner {
                 return Err("epoch_ms is past the ECMAScript maximum time value".into());
             }
         }
+        if let Some(preload) = &opts.preload {
+            let is_snapshot = serde_json::from_str::<serde_json::Value>(preload)
+                .map(|v| v.is_object())
+                .unwrap_or(false);
+            if !is_snapshot {
+                return Err(
+                    "preload must be a snapshot JSON object (the dump field of an earlier run qualifies)"
+                        .into(),
+                );
+            }
+        }
         let allow_uncapped = std::env::var("TARDIGRADE_ALLOW_UNCAPPED").as_deref() == Ok("1");
         if let Some(msg) = uncapped_run_refusal(self.prlimit.is_none(), allow_uncapped) {
             return Err(msg.to_owned());
         }
         let script = write_temp_script(code)?;
-        let _guard = TempScript(&script);
-        self.spawn_and_wait(&script, opts)
+        let _script_guard = TempScript(&script);
+        // Both files live in the same 0700 process-private directory as the
+        // script: under --sandbox the dump inode is the only file the guest
+        // can write, so it must pre-exist as a regular file we own.
+        let preload_path = match opts.preload.as_deref() {
+            Some(json) => Some(write_temp_file("preload.json".to_owned(), json)?),
+            None => None,
+        };
+        let _preload_guard = preload_path.as_deref().map(TempScript);
+        let dump_path = if opts.dump {
+            Some(write_temp_file("dump.json".to_owned(), "")?)
+        } else {
+            None
+        };
+        let _dump_guard = dump_path.as_deref().map(TempScript);
+        let mut result =
+            self.spawn_and_wait(&script, preload_path.as_deref(), dump_path.as_deref(), opts)?;
+        if let Some(dump_file) = dump_path.as_deref() {
+            result.dump = fs::read_to_string(dump_file)
+                .ok()
+                .filter(|content| !content.is_empty());
+        }
+        Ok(result)
     }
 
-    fn spawn_and_wait(&self, script: &Path, opts: &RunOptions) -> Result<RunResult, String> {
+    fn spawn_and_wait(
+        &self,
+        script: &Path,
+        preload: Option<&Path>,
+        dump: Option<&Path>,
+        opts: &RunOptions,
+    ) -> Result<RunResult, String> {
         let start = Instant::now();
         let mut child = self
-            .build_command(script, opts)
+            .build_command(script, preload, dump, opts)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -296,11 +348,24 @@ impl Runner {
             duration_ms: start.elapsed().as_millis(),
             memory_cap_mb: self.prlimit.is_some().then_some(self.effective_as_mb()),
             heap_limit_mb: self.heap_mb,
+            dump: None,
         })
     }
 
-    fn build_command(&self, script: &Path, opts: &RunOptions) -> Command {
+    fn build_command(
+        &self,
+        script: &Path,
+        preload: Option<&Path>,
+        dump: Option<&Path>,
+        opts: &RunOptions,
+    ) -> Command {
         let mut guest_args: Vec<String> = vec!["--sandbox".to_owned()];
+        if let Some(preload) = preload {
+            guest_args.push(format!("--preload={}", preload.display()));
+        }
+        if let Some(dump) = dump {
+            guest_args.push(format!("--dump={}", dump.display()));
+        }
         if opts.clock == "virtual" {
             guest_args.push("--clock=virtual".to_owned());
         }
@@ -388,7 +453,11 @@ fn script_dir() -> Result<PathBuf, String> {
 
 fn write_temp_script(code: &str) -> Result<PathBuf, String> {
     let seq = SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed);
-    let path = script_dir()?.join(format!("{seq}.js"));
+    write_temp_file(format!("{seq}.js"), code)
+}
+
+fn write_temp_file(name: String, contents: &str) -> Result<PathBuf, String> {
+    let path = script_dir()?.join(name);
     let mut opts = fs::OpenOptions::new();
     opts.write(true).create_new(true);
     #[cfg(unix)]
@@ -400,7 +469,7 @@ fn write_temp_script(code: &str) -> Result<PathBuf, String> {
     let mut file = opts
         .open(&path)
         .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
-    file.write_all(code.as_bytes())
+    file.write_all(contents.as_bytes())
         .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
 }
@@ -520,9 +589,9 @@ mod tests {
         // Cleanup is explicit and process-scoped, not tied to one Runner's Drop:
         // the directory is shared by every Runner in the process, so a Drop that
         // removed it would delete it out from under a concurrent run. One empty
-        // directory per server lifetime used to accumulate in /tmp; 118 were
-        // found on the build host before this existed. Both tests below share
-        // this directory, so they live in one test rather than racing each other.
+        // directory per server lifetime used to accumulate in /tmp. Both tests
+        // below share this directory, so they live in one test rather than
+        // racing each other.
         cleanup_script_dir();
         assert!(!dir.exists(), "cleanup must remove {dir:?}");
         cleanup_script_dir(); // and must be harmless when it is already gone
