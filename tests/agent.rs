@@ -140,3 +140,29 @@ console.log(JSON.stringify({set: globalThis.carried}));"#,
         second.stdout
     );
 }
+
+/// A guest can abort its own process: ICU data is missing, so Intl date
+/// formatting is a fatal V8 error rather than an exception (exit 133). That is a
+/// known tardigrade bug, documented in its KNOWN_BUGS.md, but the runner must
+/// contain the damage: report the abort as an error and keep serving.
+#[test]
+fn a_guest_abort_is_contained_and_the_runner_keeps_serving() {
+    let Some(runner) = runner() else { return };
+    let aborted = runner
+        .run_js(
+            r#"console.log(new Intl.DateTimeFormat("en-GB").format(new Date(0)));"#,
+            &RunOptions::default(),
+        )
+        .expect("the runner itself must survive");
+    assert_eq!(aborted.status, RunStatus::Error, "an abort is not success");
+    assert_eq!(
+        aborted.exit_code, None,
+        "the guest dies by signal, not exit code"
+    );
+
+    let after = runner
+        .run_js("console.log(6 * 7);", &RunOptions::default())
+        .expect("and the runner must still work");
+    assert_eq!(after.status, RunStatus::Ok);
+    assert_eq!(after.stdout.trim(), "42");
+}

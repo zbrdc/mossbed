@@ -28,6 +28,27 @@ following was measured against the real binary, not read off its source:
   passes the guest no arguments and no stdin. `vm.net` is unused by this server
   and is not covered by its tests.
 
+**What works, and what silently misleads.** Measured against the real binary,
+because these are the things an agent gets wrong rather than the things it gets right:
+
+- **Time is virtual by default.** `Date.now()` is `0` and `new Date().toISOString()`
+  is `1970-01-01T00:00:00.000Z` unless the caller passes `clock: "real"`, which
+  gives wall-clock time. Nothing warns you; date arithmetic just comes out 1970.
+- **Do not call the Intl date APIs.** ICU data is not loaded: `Intl.NumberFormat`
+  throws `Internal error. Icu error.`, and `Intl.DateTimeFormat`,
+  `Date.prototype.toLocale*String` and `resolvedOptions()` abort the whole guest
+  process with a fatal V8 error (exit 133). This runner reports that as an error and
+  keeps serving, but the guest is gone. It is a known tardigrade bug, listed in its
+  own KNOWN_BUGS.md.
+- **No crypto.** There is no `crypto` and no `SubtleCrypto`. `atob` and `btoa` exist,
+  so encoding works and hashing does not.
+- **Recursion stops near 10 500 frames**, and the JS heap and ArrayBuffer are each
+  capped at 256 MiB. Both arrive as catchable `RangeError`s, several times below the
+  2 GiB address-space belt.
+- **Plenty is fast enough for real work**: a 12 MB JSON document parses in ~200 ms, a
+  100 MB string can be built, a million floats sort in ~50 ms, a 5 MB regex scan takes
+  ~90 ms, and `BigInt`, `TextEncoder`, `structuredClone` and WebAssembly all work.
+
 ## Limits and fail-closed behavior
 
 - **Fail closed:** at startup the server runs `tardigrade --sandbox-check` and
