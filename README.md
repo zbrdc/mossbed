@@ -2,10 +2,17 @@
 
 Minimal MCP stdio server that lets agents (pi coding agent) run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade),
-the sandboxed Rust V8 runtime, and exposes exactly one tool, `run_js`. It fails
-closed: where the platform cannot provide tardigrade's Landlock + seccomp cage,
-the server stays up and refuses every run rather than executing anything
-unconfined.
+the sandboxed Rust V8 runtime. Its tools are `run_js` for stateless one-shot
+runs and, where the tardigrade binary offers `--serve`,
+`session_open`/`session_eval`/`session_close` for persistent sessions whose
+guest state survives between evaluations. It fails closed: where the platform
+cannot provide tardigrade's Landlock + seccomp cage, or the binary is too old
+for the flags this runner passes, the server stays up and refuses every run
+rather than executing anything unconfined.
+
+Requests are handled concurrently and `run_js` calls can be cancelled with
+the standard MCP `notifications/cancelled`. Tool results are returned as
+text and as `structuredContent`.
 
 ## Build
 
@@ -19,14 +26,49 @@ the tardigrade binary itself.
     pi mcp add tardigrade -- /absolute/path/to/tardigrade-runner/target/release/tardigrade-runner
 
 Binary resolution: `TARDIGRADE_BIN` env var, else `--tardigrade=<path>` flag, else
-`../tardigrade/target/release/tardigrade` relative to the working directory.
+`../tardigrade/target/release/tardigrade` relative to the working directory when
+it exists, else `tardigrade` on `PATH`. Whatever is found must still pass
+`--sandbox-check` and a capability probe of its advertised flags.
 
-The tool's arguments and result schema are documented where a client reads them:
-the `run_js` tool description in `src/main.rs`. The runner's own decisions -
-the flags it passes, the deadline, the caps, the note it adds to a guest's
-stderr - are documented at the code that makes them in `src/lib.rs`. The guest
-itself is tardigrade's to document: see its `GUEST-API.md`, `OPTIONS.md`,
-`SANDBOX.md` and `KNOWN_BUGS.md`.
+## Operator settings
+
+Ceilings are operator settings, never tool arguments — a model must not be
+able to lift its own limits or grant itself network access. All are
+environment variables read at startup:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TARDIGRADE_RUNNER_MEM` | `256` | guest heap/ArrayBuffer cap, MiB |
+| `TARDIGRADE_RUNNER_AS` | `2048` | address-space belt floor (`prlimit --as`), MiB |
+| `TARDIGRADE_RUNNER_FS_QUOTA` | `64` | RAM-filesystem quota, MiB (`0` disables) |
+| `TARDIGRADE_RUNNER_INPUT_MAX` | `4194304` | largest `code`/`preload`/eval accepted, bytes |
+| `TARDIGRADE_RUNNER_DUMP_MAX` | `1048576` | largest dump returned inline, bytes |
+| `TARDIGRADE_RUNNER_ALLOW_CALL` | — | granted endpoints: `NAME=URL[,METHOD]` entries separated by `;` |
+| `TARDIGRADE_RUNNER_NET_MAX_RESPONSE` | `1048576` | per-response byte cap for granted calls |
+| `TARDIGRADE_RUNNER_NET_TOTAL_BYTES` | `8388608` | per-run network byte budget |
+| `TARDIGRADE_RUNNER_NET_TIMEOUT_MS` | `30000` | per-request network timeout |
+| `TARDIGRADE_RUNNER_NET_ALLOW_PRIVATE` | — | `1` lets granted endpoints resolve to private/loopback addresses |
+| `TARDIGRADE_RUNNER_MAX_SESSIONS` | `8` | concurrent sessions |
+| `TARDIGRADE_RUNNER_SESSION_IDLE_MS` | `300000` | idle time before a session is reaped |
+
+`TARDIGRADE_RUNNER_AS` is a floor, not the belt that applies: the runner
+raises it to cover V8's own address-space reservation — about 69 GiB with
+tardigrade's current `pointer compression` build, which is why a small belt
+aborts V8 at startup — plus the heap cap. `TARDIGRADE_RUNNER_MEM`, not the
+belt, is what bounds a guest.
+
+With no `TARDIGRADE_RUNNER_ALLOW_CALL`, guests are fully offline and
+`vm.net.request` does not exist. With grants, the guest calls endpoints by
+name only (`vm.net.request(name, body)`); URLs are never shown to the guest
+or returned in results, and tardigrade's sidecar enforces the budgets and
+address rules — see its `docs/NETWORK_CAPABILITIES.md`.
+
+The tools' arguments and result schemas are documented where a client reads
+them: the tool descriptions in `src/main.rs`. The runner's own decisions —
+the flags it passes, the deadlines, the caps, the notes it adds to a guest's
+stderr — are documented at the code that makes them in `src/lib.rs`. The
+guest itself is tardigrade's to document: see its `docs/GUEST-API.md`,
+`docs/OPTIONS.md`, `docs/SANDBOX.md` and `docs/KNOWN_BUGS.md`.
 
 ## Licence
 
