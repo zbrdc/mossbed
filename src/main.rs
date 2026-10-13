@@ -19,11 +19,13 @@ use tardigrade_runner::{
 struct RunJsParams {
     code: String,
     timeout_ms: Option<u32>,
-    seed: Option<u32>,
+    seed: Option<u64>,
     clock: Option<String>,
     epoch_ms: Option<u64>,
     preload: Option<String>,
     dump: Option<bool>,
+    args: Option<Vec<String>>,
+    module: Option<bool>,
 }
 
 fn main() {
@@ -173,6 +175,8 @@ fn call_tool(
         epoch_ms: args.epoch_ms,
         preload: args.preload,
         dump: args.dump.unwrap_or(false),
+        args: args.args.unwrap_or_default(),
+        module: args.module.unwrap_or(false),
     };
     match runner.run_js(&args.code, &opts) {
         Ok(result) => Ok(json!({
