@@ -18,10 +18,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-/// Address-space cap (MiB) applied with `prlimit --as`.
-///
-/// V8 aborts at startup below ~1.3 GiB of address space (measured), so 2 GiB
-/// lets V8 start while still bounding a runaway allocator.
+/// Address-space belt (`prlimit --as`) in MiB: a floor, not the value
+/// applied, because the runner raises it to cover V8's own reservation plus
+/// the heap cap. It cannot make the guest's bound tighter than the heap cap.
 pub const DEFAULT_AS_CAP_MB: u64 = 2048;
 
 /// Heap and ArrayBuffer cap in MiB, passed to tardigrade as --memory.
@@ -40,10 +39,17 @@ pub const MIN_HEAP_MB: u64 = 8;
 /// must be made iterative.
 pub const GUEST_RECURSION_LIMIT_HINT: u32 = 10_500;
 
-/// Address space V8 occupies before any guest byte is allocated. The belt is
-/// raised to at least this plus the heap cap, so the heap cap the operator
-/// asks for is the one that binds.
-const AS_FLOOR_MB: u64 = 1800;
+/// Address space V8 reserves before any guest byte is allocated; the belt is
+/// raised to at least this plus the heap cap.
+///
+/// Measured against tardigrade's current build (rusty_v8 139 with pointer
+/// compression): a run works with 70 592 MiB of address space and aborts V8
+/// ("Failed to reserve virtual memory for process-wide V8 pointer compression
+/// cage") at 70 528 MiB, identical at `--memory=256` and `--memory=1024`, so
+/// the reservation does not scale with the heap cap. 72 GiB leaves ~3 GiB of
+/// slack. It is V8's reservation and not the guest's, which is why the belt
+/// is a backstop here and the heap cap is the bound that binds.
+const AS_FLOOR_MB: u64 = 72 * 1024;
 
 /// Extra time past the guest's own `--timeout` before the parent SIGKILLs,
 /// so tardigrade's clean exit 124 usually wins over a raw kill.
