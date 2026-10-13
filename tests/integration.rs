@@ -234,3 +234,108 @@ fn oversized_dump_is_suppressed_with_a_stderr_note() {
         result.stderr
     );
 }
+
+/// Caller arguments reach the guest as vm.args, and a u64-range seed
+/// (past the old u32 ceiling) is accepted and stays deterministic.
+#[test]
+fn args_and_wide_seeds_reach_the_guest() {
+    let Some(runner) = runner() else { return };
+    let opts = RunOptions {
+        seed: 5_000_000_001,
+        args: vec!["alpha".into(), "beta gamma".into()],
+        ..RunOptions::default()
+    };
+    let code = "console.log(JSON.stringify({args: vm.args, r: Math.random()}));";
+    let first = runner.run_js(code, &opts).expect("run");
+    let second = runner.run_js(code, &opts).expect("run");
+    assert_eq!(first.status, RunStatus::Ok, "stderr: {:?}", first.stderr);
+    assert!(
+        first.stdout.contains(r#""args":["alpha","beta gamma"]"#),
+        "stdout was {:?}",
+        first.stdout
+    );
+    assert_eq!(first.stdout, second.stdout, "same wide seed, same run");
+}
+
+/// The RAM-filesystem quota is passed explicitly, reported in every
+/// result, and actually enforced in the guest.
+#[test]
+fn the_fs_quota_is_reported_and_enforced() {
+    let Some(runner) = runner() else { return };
+    let plain = runner
+        .run_js("console.log(1);", &RunOptions::default())
+        .expect("run");
+    assert_eq!(plain.fs_quota_mb, 64, "tardigrade's default, stated");
+
+    let tight = runner.with_fs_quota_mb(1);
+    let result = tight
+        .run_js(
+            r#"try { vm.fs.write("/big", "x".repeat(2 * 1024 * 1024)); console.log("wrote"); } catch (e) { console.log("threw"); }"#,
+            &RunOptions::default(),
+        )
+        .expect("run");
+    assert_eq!(result.fs_quota_mb, 1);
+    assert_eq!(
+        result.stdout.trim(),
+        "threw",
+        "2 MiB must not fit a 1 MiB quota"
+    );
+}
+
+/// --module is opt-in per run: top-level await parses as a module and
+/// is a syntax error as a classic script.
+#[test]
+fn module_mode_is_opt_in() {
+    let Some(runner) = runner() else { return };
+    if !runner.capabilities().module {
+        eprintln!("SKIP: tardigrade binary has no --module");
+        return;
+    }
+    let code = "const v = await Promise.resolve(42); console.log(v);";
+    let as_script = runner.run_js(code, &RunOptions::default()).expect("run");
+    assert_eq!(as_script.status, RunStatus::Error);
+
+    let opts = RunOptions {
+        module: true,
+        ..RunOptions::default()
+    };
+    let as_module = runner.run_js(code, &opts).expect("run");
+    assert_eq!(
+        as_module.status,
+        RunStatus::Ok,
+        "stderr: {:?}",
+        as_module.stderr
+    );
+    assert_eq!(as_module.stdout.trim(), "42");
+}
+
+/// A cancelled run is SIGKILLed promptly and reported as cancelled, not
+/// as a timeout: the flag is set 100 ms into a run allowed a full minute.
+#[test]
+fn a_cancelled_run_stops_promptly() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let Some(runner) = runner() else { return };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let setter = {
+        let cancel = Arc::clone(&cancel);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            cancel.store(true, Ordering::Relaxed);
+        })
+    };
+    let opts = RunOptions {
+        timeout_ms: 60_000,
+        ..RunOptions::default()
+    };
+    let result = runner
+        .run_js_cancellable("for (;;) {}", &opts, Some(&cancel))
+        .expect("run");
+    let _ = setter.join();
+    assert_eq!(result.status, RunStatus::Cancelled);
+    assert!(
+        result.duration_ms < 10_000,
+        "cancellation must be prompt, took {} ms",
+        result.duration_ms
+    );
+}

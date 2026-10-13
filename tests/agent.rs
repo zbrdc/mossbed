@@ -129,23 +129,29 @@ console.log(JSON.stringify({set: globalThis.carried}));"#,
     );
 }
 
-/// A guest can abort its own process: ICU data is missing, so Intl date
-/// formatting is a fatal V8 error rather than an exception (exit 133). That is a
-/// known tardigrade bug, documented in its KNOWN_BUGS.md, but the runner must
-/// contain the damage: report the abort as an error and keep serving.
+/// ICU data is missing, so Intl is stubbed to a catchable error (older
+/// tardigrade builds aborted the guest inside V8; current ones exit 1 with
+/// "Intl is not available in this build" — see its KNOWN_BUGS.md). Either
+/// way the runner must report the failure as an error and keep serving.
 #[test]
-fn a_guest_abort_is_contained_and_the_runner_keeps_serving() {
+fn an_intl_failure_is_contained_and_the_runner_keeps_serving() {
     let Some(runner) = runner() else { return };
-    let aborted = runner
+    let failed = runner
         .run_js(
             r#"console.log(new Intl.DateTimeFormat("en-GB").format(new Date(0)));"#,
             &RunOptions::default(),
         )
         .expect("the runner itself must survive");
-    assert_eq!(aborted.status, RunStatus::Error, "an abort is not success");
     assert_eq!(
-        aborted.exit_code, None,
-        "the guest dies by signal, not exit code"
+        failed.status,
+        RunStatus::Error,
+        "an Intl failure is not success"
+    );
+    assert_eq!(
+        failed.exit_code,
+        Some(1),
+        "the guest fails with an uncaught exception, stderr was {:?}",
+        failed.stderr
     );
 
     let after = runner
@@ -229,28 +235,32 @@ fn epoch_ms_is_validated_before_the_guest_starts() {
     );
 }
 
-/// A V8 abort comes back with an explanation appended, because a bare backtrace
-/// tells an agent nothing it can act on. Ordinary failures are left alone.
+/// A known guest limitation comes back with an explanation appended,
+/// because a bare error tells an agent nothing it can act on. Ordinary
+/// failures are left alone.
 #[test]
-fn an_abort_is_explained_and_ordinary_errors_are_not() {
+fn an_intl_failure_is_explained_and_ordinary_errors_are_not() {
     let Some(runner) = runner() else { return };
-    let aborted = runner
+    let failed = runner
         .run_js(
             r#"console.log(new Intl.DateTimeFormat("en-GB").format(new Date(0)));"#,
             &RunOptions::default(),
         )
         .expect("run");
     assert!(
-        aborted.stderr.contains("known ICU bug"),
-        "an abort must be explained, stderr was {:?}",
-        aborted.stderr
+        failed
+            .stderr
+            .contains("Intl is not available in this build")
+            && failed.stderr.contains("ships no ICU data"),
+        "the failure and its explanation must both be present, stderr was {:?}",
+        failed.stderr
     );
 
     let syntax = runner
         .run_js("const x = ;", &RunOptions::default())
         .expect("run");
     assert!(
-        syntax.stderr.contains("SyntaxError") && !syntax.stderr.contains("known ICU bug"),
+        syntax.stderr.contains("SyntaxError") && !syntax.stderr.contains("ships no ICU data"),
         "ordinary errors keep their own trace, stderr was {:?}",
         syntax.stderr
     );
