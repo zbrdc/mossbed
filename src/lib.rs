@@ -42,14 +42,11 @@ pub const GUEST_RECURSION_LIMIT_HINT: u32 = 10_500;
 /// Address space V8 reserves before any guest byte is allocated; the belt is
 /// raised to at least this plus the heap cap.
 ///
-/// Measured against tardigrade's current build (rusty_v8 139 with pointer
-/// compression): a run works with 70 592 MiB of address space and aborts V8
-/// ("Failed to reserve virtual memory for process-wide V8 pointer compression
-/// cage") at 70 528 MiB, identical at `--memory=256` and `--memory=1024`, so
-/// the reservation does not scale with the heap cap. 72 GiB leaves ~3 GiB of
-/// slack. It is V8's reservation and not the guest's, which is why the belt
-/// is a backstop here and the heap cap is the bound that binds.
-const AS_FLOOR_MB: u64 = 72 * 1024;
+/// rusty_v8 152 aborts its Oilpan cage reservation at the former 72 GiB
+/// floor. A small sandboxed run succeeds at 96 and 128 GiB, with an
+/// unconstrained startup peak of about 104 GiB but only 18 MiB resident.
+/// Leave startup headroom without changing the guest heap cap.
+const AS_FLOOR_MB: u64 = 128 * 1024;
 
 /// Extra time past the guest's own `--timeout` before the parent SIGKILLs,
 /// so tardigrade's clean exit 124 usually wins over a raw kill.

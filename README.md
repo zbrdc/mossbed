@@ -52,10 +52,10 @@ environment variables read at startup:
 | `TARDIGRADE_RUNNER_SESSION_IDLE_MS` | `300000` | idle time before a session is reaped |
 
 `TARDIGRADE_RUNNER_AS` is a floor, not the belt that applies: the runner
-raises it to cover V8's own address-space reservation — about 69 GiB with
-tardigrade's current `pointer compression` build, which is why a small belt
-aborts V8 at startup — plus the heap cap. `TARDIGRADE_RUNNER_MEM`, not the
-belt, is what bounds a guest.
+raises it to at least 128 GiB plus the heap cap to cover V8's startup
+address-space reservations. This is virtual address space, not resident RAM;
+a smaller belt can abort V8 before guest code runs. `TARDIGRADE_RUNNER_MEM`,
+not the belt, bounds the guest heap.
 
 With no `TARDIGRADE_RUNNER_ALLOW_CALL`, guests are fully offline and
 `vm.net.request` does not exist. With grants, the guest calls endpoints by
