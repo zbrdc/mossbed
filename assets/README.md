@@ -2,17 +2,18 @@
 
 Copyright 2026 zbrdc. Licensed under [Apache-2.0](../LICENSE).
 
-## Moss tile: compact icon
+<img src="brand.png" width="720" alt="Moss tile icon on the left and sheltered tardigrade mascot on the right">
 
-<img src="icon.svg" width="128" alt="Mossbed moss tile">
+`brand.png` is the 1000 × 360 README preview. Its opaque white background
+keeps both green marks visible in light and dark GitHub themes.
+
+## Moss tile: compact icon
 
 `icon.svg` is the vector source for application icons. `icon.png` is 512 × 512,
 and `favicon.png` is 32 × 32. Use at least 24px where possible.
 At 16px, the silhouette remains visible but the winding channels compress.
 
 ## Sheltered tardigrade: mascot
-
-<img src="logo.svg" width="144" alt="Mossbed sheltered tardigrade">
 
 `logo.svg` is the vector source for the README mascot. `logo.png` is 512 × 313.
 Use at least 144px wide for the eye and four feet. Small claws read best at
