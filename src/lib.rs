@@ -13,6 +13,7 @@
 
 use std::fs;
 use std::io::{Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -168,6 +169,10 @@ pub struct RunOptions {
     /// and return it as RunResult::dump, so a caller can hand it to a later
     /// run's preload.
     pub dump: bool,
+    /// Opt in to a version-1 run-preparation manifest
+    /// (tardigrade --run-manifest) for one-shot runs; the parsed record
+    /// comes back in RunResult.manifest.
+    pub manifest: bool,
     /// Arguments handed to the guest after the script path (tardigrade
     /// `[args...]`). Caller-controlled data, like the code itself.
     pub args: Vec<String>,
@@ -186,6 +191,7 @@ impl Default for RunOptions {
             epoch_ms: None,
             preload: None,
             dump: false,
+            manifest: false,
             args: Vec::new(),
             module: false,
         }
@@ -226,6 +232,10 @@ pub struct RunResult {
     /// call with vm.net.request; empty when the guest was offline. Names
     /// only: URLs are operator policy and never leave the runner.
     pub net_capabilities: Vec<String>,
+    /// Version-1 run-preparation manifest (tardigrade --run-manifest)
+    /// when requested: hashes of what actually ran, published before
+    /// guest evaluation.
+    pub manifest: Option<serde_json::Value>,
     /// End-of-run filesystem snapshot when dump was requested and the run
     /// wrote one; None otherwise (dump not requested, or the run ended before
     /// any state existed). Feed it back as preload to continue a workflow.
@@ -278,6 +288,9 @@ pub struct Capabilities {
     pub allow_call: bool,
     pub fs_quota: bool,
     pub module: bool,
+    pub identity: bool,
+    pub bundle: bool,
+    pub run_manifest: bool,
 }
 
 fn parse_capabilities(usage: &str) -> Capabilities {
@@ -286,6 +299,9 @@ fn parse_capabilities(usage: &str) -> Capabilities {
         allow_call: usage.contains("--allow-call"),
         fs_quota: usage.contains("--fs-quota"),
         module: usage.contains("--module"),
+        identity: usage.contains("--identity"),
+        bundle: usage.contains("--bundle"),
+        run_manifest: usage.contains("--run-manifest"),
     }
 }
 
@@ -351,6 +367,13 @@ pub struct Runner {
     /// Operator opt-in only (MOSSBED_NET_ALLOW_PRIVATE=1):
     /// granted endpoints may resolve to private/loopback addresses.
     net_allow_private: bool,
+    /// Engine identity from `tardigrade --identity` (package + V8 string)
+    /// when the binary advertises it.
+    engine: Option<String>,
+    package: Option<String>,
+    /// Set when MOSSBED_PIN_V8 demands a different engine: every tool then
+    /// refuses, fail closed, exactly like a failed sandbox check.
+    identity_gate: Option<String>,
 }
 
 impl Runner {
@@ -382,6 +405,9 @@ impl Runner {
             )?,
             net_timeout_ms: env_setting("MOSSBED_NET_TIMEOUT_MS", DEFAULT_NET_TIMEOUT_MS, "ms")?,
             net_allow_private: std::env::var("MOSSBED_NET_ALLOW_PRIVATE").as_deref() == Ok("1"),
+            engine: None,
+            package: None,
+            identity_gate: None,
         })
     }
 
@@ -451,6 +477,46 @@ impl Runner {
         self.net_allow_private
     }
 
+    /// Reads `tardigrade --identity`, stores the engine identity and
+    /// enforces MOSSBED_PIN_V8: an operator-pinned engine string that no
+    /// longer matches refuses every later run (drift is not silent).
+    fn probe_identity(&mut self) -> Result<(), String> {
+        let out = Command::new(&self.bin)
+            .arg("--identity")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("cannot run {} --identity: {e}", self.bin.display()))?;
+        let parsed: serde_json::Value = serde_json::from_slice(&out.stdout)
+            .map_err(|e| format!("--identity did not print JSON: {e}"))?;
+        self.engine = parsed.get("v8").and_then(|v| v.as_str()).map(str::to_owned);
+        self.package = parsed
+            .get("tardigrade")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+        if let Some(engine) = &self.engine {
+            if let Ok(pin) = std::env::var("MOSSBED_PIN_V8") {
+                if !pin.is_empty() && &pin != engine {
+                    self.identity_gate = Some(format!(
+                        "tardigrade engine is {engine} but MOSSBED_PIN_V8 pins {pin}"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The V8 engine string of the wrapped binary, when it reports one.
+    pub fn engine(&self) -> Option<&str> {
+        self.engine.as_deref()
+    }
+
+    /// A refusal message when the pinned engine no longer matches.
+    pub fn identity_refusal(&self) -> Option<String> {
+        self.identity_gate.clone()
+    }
+
     /// Capabilities probed from the binary at the last sandbox check.
     pub fn capabilities(&self) -> Capabilities {
         self.caps
@@ -482,6 +548,12 @@ impl Runner {
                     "{} does not advertise --fs-quota; refusing to run against an incompatible tardigrade",
                     self.bin.display()
                 ));
+            }
+            if self.caps.identity {
+                match self.probe_identity() {
+                    Ok(()) => {}
+                    Err(msg) => return Err(msg),
+                }
             }
             if !self.allow_calls.is_empty() && !self.caps.allow_call {
                 return Err(format!(
@@ -593,13 +665,24 @@ impl Runner {
             None
         };
         let _dump_guard = dump_path.as_deref().map(TempScript);
+        // The manifest destination must not pre-exist: tardigrade creates
+        // it exclusively, so only the path is reserved here.
+        let manifest_path = match (opts.manifest.then(|| temp_name("manifest", "json"))) {
+            None => None,
+            Some(name) => Some(script_dir()?.join(name)),
+        };
+        let _manifest_guard = manifest_path.as_deref().map(TempScript);
         let mut result = self.spawn_and_wait(
             &script,
             preload_path.as_deref(),
             dump_path.as_deref(),
+            manifest_path.as_deref(),
             opts,
             cancel,
         )?;
+        if let Some(manifest_file) = manifest_path.as_deref() {
+            result.manifest = read_json_file(manifest_file);
+        }
         if let Some(dump_file) = dump_path.as_deref() {
             let (dump, note) = self.read_dump(dump_file);
             if let Some(note) = note {
@@ -636,12 +719,13 @@ impl Runner {
         script: &Path,
         preload: Option<&Path>,
         dump: Option<&Path>,
+        manifest: Option<&Path>,
         opts: &RunOptions,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<RunResult, String> {
         let start = Instant::now();
         let mut child = self
-            .build_command(script, preload, dump, opts)
+            .build_command(script, preload, dump, manifest, opts)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -682,6 +766,77 @@ impl Runner {
             heap_limit_mb: self.heap_mb,
             fs_quota_mb: self.fs_quota_mb,
             net_capabilities: self.net_capability_names(),
+            manifest: None,
+            dump: None,
+        })
+    }
+
+    /// Runs a validated deployment bundle (tardigrade --bundle): hashes,
+    /// budgets, capability policy and the runtime identity are checked by
+    /// the guest runtime before any code runs; a mismatch exits 2 with no
+    /// guest output. The spawn/wait/drain logic mirrors spawn_and_wait
+    /// because the bundle replaces the entry script entirely; fold the two
+    /// when a second bundle-only knob appears.
+    pub fn run_bundle(&self, bundle_json: &str, opts: &RunOptions) -> Result<RunResult, String> {
+        if !self.sandbox_ok {
+            return Err("tardigrade --sandbox-check has not passed; refusing to run".into());
+        }
+        if !self.caps.bundle {
+            return Err("tardigrade does not advertise --bundle; refusing".into());
+        }
+        let allow_uncapped = std::env::var("TARDIGRADE_ALLOW_UNCAPPED").as_deref() == Ok("1");
+        if let Some(msg) = uncapped_run_refusal(self.prlimit.is_none(), allow_uncapped) {
+            return Err(msg.to_owned());
+        }
+        let bundle_path = write_temp_file(temp_name("bundle", "json"), bundle_json)?;
+        let _bundle_guard = TempScript(&bundle_path);
+        // The manifest destination must not pre-exist: tardigrade creates
+        // it exclusively, so only the path is reserved here.
+        let manifest_path = match (opts.manifest.then(|| temp_name("manifest", "json"))) {
+            None => None,
+            Some(name) => Some(script_dir()?.join(name)),
+        };
+        let _manifest_guard = manifest_path.as_deref().map(TempScript);
+        let start = Instant::now();
+        let mut guest_args = self.common_guest_args(None, None, opts);
+        guest_args.push(format!("--timeout={}", opts.timeout_ms));
+        guest_args.push(format!("--bundle={}", bundle_path.display()));
+        if let Some(manifest) = manifest_path.as_deref() {
+            guest_args.push(format!("--run-manifest={}", manifest.display()));
+        }
+        let mut child = self
+            .wrap_command(&guest_args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot spawn tardigrade: {e}"))?;
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+        let stdout_thread = std::thread::spawn(move || drain_pipe(stdout_pipe));
+        let stderr_thread = std::thread::spawn(move || drain_pipe(stderr_pipe));
+        let deadline = Duration::from_millis(u64::from(opts.timeout_ms) + KILL_GRACE_MS);
+        let (status, kill) = wait_with_deadline(&mut child, deadline, None)?;
+        let stdout = stdout_thread
+            .join()
+            .map_err(|_| "stdout drain thread panicked".to_owned())?;
+        let stderr = stderr_thread
+            .join()
+            .map_err(|_| "stderr drain thread panicked".to_owned())?;
+        let (status_kind, exit_code) = classify(status, kill);
+        Ok(RunResult {
+            status: status_kind,
+            clock: opts.clock.clone(),
+            epoch_ms: opts.epoch_ms,
+            exit_code,
+            stdout,
+            stderr: with_abort_note(stderr, self.heap_mb),
+            duration_ms: start.elapsed().as_millis(),
+            memory_cap_mb: self.prlimit.is_some().then_some(self.effective_as_mb()),
+            heap_limit_mb: self.heap_mb,
+            fs_quota_mb: self.fs_quota_mb,
+            net_capabilities: self.net_capability_names(),
+            manifest: manifest_path.as_deref().and_then(read_json_file),
             dump: None,
         })
     }
@@ -742,11 +897,16 @@ impl Runner {
                 // `--` keeps prlimit from parsing tardigrade's own flags.
                 cmd.arg(format!("--as={}", self.effective_as_mb() * 1024 * 1024));
                 cmd.arg("--").arg(&self.bin).args(guest_args);
+                // Own process group for the whole guest subtree (prlimit
+                // execs into tardigrade without changing it), so the group
+                // kill below reaches every descendant, net sidecar included.
+                cmd.process_group(0);
                 cmd
             }
             None => {
                 let mut cmd = Command::new(&self.bin);
                 cmd.args(guest_args);
+                cmd.process_group(0);
                 cmd
             }
         }
@@ -757,9 +917,13 @@ impl Runner {
         script: &Path,
         preload: Option<&Path>,
         dump: Option<&Path>,
+        manifest: Option<&Path>,
         opts: &RunOptions,
     ) -> Command {
         let mut guest_args = self.common_guest_args(preload, dump, opts);
+        if let Some(manifest) = manifest {
+            guest_args.push(format!("--run-manifest={}", manifest.display()));
+        }
         guest_args.push(format!("--timeout={}", opts.timeout_ms));
         guest_args.push(script.to_string_lossy().into_owned());
         guest_args.extend(opts.args.iter().cloned());
@@ -903,6 +1067,34 @@ enum Kill {
     Cancelled,
 }
 
+/// Kills the guest's whole process group, then reaps the child: a
+/// cancelled, deadlined or wedged guest must not leave descendants behind
+/// (a net sidecar above all), whatever binary version runs underneath.
+/// The group signal goes through util-linux `kill` - the same package the
+/// prlimit belt comes from - because this crate forbids unsafe code; when
+/// the tool is missing this degrades to the previous child-only kill.
+/// Reads a small JSON file the guest runtime wrote (a manifest), parsed;
+/// None when absent or unparsable - a missing record is not a run failure.
+fn read_json_file(path: &Path) -> Option<serde_json::Value> {
+    const MAX: u64 = 256 * 1024;
+    let bytes = fs::read(path).ok()?;
+    if bytes.len() as u64 > MAX {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn kill_guest(child: &mut Child) {
+    let pgid = child.id();
+    let _ = Command::new("kill")
+        .arg("-9")
+        .arg("--")
+        .arg(format!("-{pgid}"))
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// One `--serve` command's outcome: the raw JSON reply line from the guest
 /// (`{"$error":...}` included — a guest error is a reply, not a transport
 /// failure) plus whatever the guest printed to stderr since the last call.
@@ -997,8 +1189,7 @@ impl Session {
                 duration_ms: start.elapsed().as_millis(),
             }),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                let _ = self.child.kill();
-                let _ = self.child.wait();
+                kill_guest(&mut self.child);
                 self.alive = false;
                 Err(format!(
                     "session did not reply within {} ms and was killed",
@@ -1027,7 +1218,7 @@ impl Session {
         drop(self.stdin.take());
         let (status, _) = wait_with_deadline(&mut self.child, Duration::from_secs(2), None)
             .unwrap_or_else(|_| {
-                let _ = self.child.kill();
+                kill_guest(&mut self.child);
                 (
                     self.child.wait().expect("reap killed session"),
                     Kill::Deadline,
@@ -1062,8 +1253,7 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         if self.alive {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
+            kill_guest(&mut self.child);
         }
         for path in [&self._entry_guard, &self._preload_guard, &self.dump_path]
             .into_iter()
@@ -1202,7 +1392,7 @@ fn wait_with_deadline(
         }
         let cancelled = cancel.is_some_and(|c| c.load(Ordering::Relaxed));
         if cancelled || Instant::now() >= end {
-            let _ = child.kill();
+            kill_guest(child);
             let status = child
                 .wait()
                 .map_err(|e| format!("reaping killed tardigrade failed: {e}"))?;

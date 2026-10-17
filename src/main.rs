@@ -51,6 +51,13 @@ struct RunJsParams {
     dump: Option<bool>,
     args: Option<Vec<String>>,
     module: Option<bool>,
+    manifest: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct RunBundleParams {
+    bundle: String,
+    timeout_ms: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -294,12 +301,29 @@ fn tool_specs(state: &State) -> Vec<Value> {
                 "args": {"type": "array", "items": {"type": "string"},
                     "description": "Arguments handed to the guest after the script path."},
                 "module": {"type": "boolean",
-                    "description": "Parse the code as an ES module (import/export, top-level await; specifiers resolve inside the RAM filesystem)."}
+                    "description": "Parse the code as an ES module (import/export, top-level await; specifiers resolve inside the RAM filesystem)."},
+                "manifest": {"type": "boolean",
+                    "description": "Write a version-1 run-preparation manifest (tardigrade --run-manifest) and return it parsed as the result manifest field: hashes of the inputs that actually ran, published before guest execution."}
             },
             "required": ["code"]
         },
         "outputSchema": {"type": "object"}
     })];
+    if state.runner.capabilities().bundle {
+        tools.push(json!({
+            "name": "run_bundle",
+            "description": "Run a validated tardigrade deployment bundle (JSON artifact: entry source, optional preload snapshot, resource budgets, capability policy, runtime identity). Hashes and the exact V8 engine identity are checked before any guest code exists; a mismatch refuses with no execution. Bundle budgets override the runner defaults.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle": {"type": "string", "description": "The deployment bundle JSON (format tardigrade.deploy-bundle, version 1)."},
+                    "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 3600000}
+                },
+                "required": ["bundle"]
+            },
+            "outputSchema": {"type": "object"}
+        }));
+    }
     if state.runner.capabilities().serve {
         tools.push(json!({
             "name": "session_open",
@@ -380,7 +404,10 @@ fn gate_refusal(state: &State) -> Option<Value> {
         Err(msg) => Some(error_text(format!(
             "refused: tardigrade sandbox check failed: {msg}"
         ))),
-        Ok(()) => None,
+        Ok(()) => state
+            .runner
+            .identity_refusal()
+            .map(|msg| error_text(format!("refused: {msg}"))),
     }
 }
 
@@ -404,6 +431,7 @@ fn call_tool(
         "session_open" => Ok(session_open_tool(&params, state)?),
         "session_eval" => Ok(session_eval_tool(&params, state)?),
         "session_close" => Ok(session_close_tool(&params, state)?),
+        "run_bundle" => Ok(run_bundle_tool(&params, state)?),
         _ => Err((-32602, format!("unknown tool: {name}"))),
     }
 }
@@ -423,6 +451,7 @@ fn run_js_tool(params: &Value, request_id: &Value, state: &State) -> Result<Valu
         dump: args.dump.unwrap_or(false),
         args: args.args.unwrap_or_default(),
         module: args.module.unwrap_or(false),
+        manifest: args.manifest.unwrap_or(false),
     };
     // Register the cancellation flag under this request's id so a
     // notifications/cancelled can find it; deregister on return.
@@ -442,7 +471,13 @@ fn run_js_tool(params: &Value, request_id: &Value, state: &State) -> Result<Valu
         .unwrap_or_else(|e| e.into_inner())
         .remove(&key);
     Ok(match outcome {
-        Ok(result) => structured(serde_json::to_value(truncate(result)).expect("serialize result")),
+        Ok(result) => {
+            let mut value = serde_json::to_value(truncate(result)).expect("serialize result");
+            if let Some(engine) = state.runner.engine() {
+                value["engine"] = serde_json::json!(engine);
+            }
+            structured(value)
+        }
         Err(msg) => error_text(msg),
     })
 }
@@ -453,6 +488,35 @@ fn run_js_tool(params: &Value, request_id: &Value, state: &State) -> Result<Valu
 fn reap_idle(state: &State) {
     let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
     sessions.retain(|_, managed| managed.last_used.elapsed() <= state.session_idle);
+}
+
+fn run_bundle_tool(params: &Value, state: &State) -> Result<Value, (i32, String)> {
+    let args: RunBundleParams = parse_args(params)?;
+    if let Some(refusal) = gate_refusal(state) {
+        return Ok(refusal);
+    }
+    let defaults = RunOptions::default();
+    let opts = RunOptions {
+        timeout_ms: args.timeout_ms.unwrap_or(defaults.timeout_ms),
+        seed: defaults.seed,
+        clock: defaults.clock,
+        epoch_ms: None,
+        preload: None,
+        dump: false,
+        manifest: false,
+        args: Vec::new(),
+        module: false,
+    };
+    match state.runner.run_bundle(&args.bundle, &opts) {
+        Ok(result) => {
+            let mut value = serde_json::to_value(truncate(result)).expect("serialize result");
+            if let Some(engine) = state.runner.engine() {
+                value["engine"] = serde_json::json!(engine);
+            }
+            Ok(structured(value))
+        }
+        Err(msg) => Ok(error_text(msg)),
+    }
 }
 
 fn session_open_tool(params: &Value, state: &State) -> Result<Value, (i32, String)> {
@@ -480,6 +544,7 @@ fn session_open_tool(params: &Value, state: &State) -> Result<Value, (i32, Strin
         dump: args.dump.unwrap_or(false),
         args: args.args.unwrap_or_default(),
         module: args.module.unwrap_or(false),
+        manifest: false,
     };
     let ttl_ms = args.ttl_ms.unwrap_or(DEFAULT_SESSION_TTL_MS);
     match state
@@ -505,6 +570,7 @@ fn session_open_tool(params: &Value, state: &State) -> Result<Value, (i32, Strin
                 "heap_limit_mb": state.runner.heap_mb(),
                 "fs_quota_mb": state.runner.fs_quota_mb(),
                 "net_capabilities": state.runner.net_capability_names(),
+                "engine": state.runner.engine(),
             })))
         }
         Err(msg) => Ok(error_text(msg)),
