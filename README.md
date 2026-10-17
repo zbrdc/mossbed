@@ -1,6 +1,7 @@
-# mossbed
-
-<img src="assets/icon-readme.png" width="256" alt="Mossbed square moss-tile logo">
+<p align="center">
+  <img src="assets/icon-readme.png" width="256" alt="Mossbed square moss-tile logo">
+</p>
+<h1 align="center">mossbed</h1>
 
 Minimal MCP stdio server that lets AI agents run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade),
