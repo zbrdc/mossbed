@@ -99,13 +99,6 @@ stderr — are documented at the code that makes them in `src/lib.rs`. The
 guest itself is tardigrade's to document: see its `docs/GUEST-API.md`,
 `docs/OPTIONS.md`, `docs/SANDBOX.md` and `docs/KNOWN_BUGS.md`.
 
-## Project marks
-
-The moss tile is the project logo, application icon, and favicon. The sheltered
-tardigrade is an alternate mascot. Both use moss green on transparent backgrounds.
-Use them on light surfaces. See [Mossbed marks](assets/README.md) for files,
-dimensions, and minimum sizes.
-
 ## Licence
 
 Apache-2.0, see [LICENSE](LICENSE).
