@@ -9,7 +9,7 @@
 //! TARDIGRADE_REQUIRE_TESTS turns that skip into a failure, so a release check
 //! can insist that the V8-backed tests actually ran.
 
-use tardigrade_runner::{Runner, resolve_bin};
+use mossbed::{Runner, resolve_bin};
 
 /// A checked runner, or None when the binary is absent and skipping is allowed.
 pub fn runner() -> Option<Runner> {

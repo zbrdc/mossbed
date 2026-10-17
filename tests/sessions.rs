@@ -5,7 +5,7 @@
 //! They skip when the binary is absent, like the rest of the suite, and
 //! also when the binary predates --serve.
 
-use tardigrade_runner::RunOptions;
+use mossbed::RunOptions;
 
 mod common;
 use common::runner;

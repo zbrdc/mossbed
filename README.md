@@ -1,4 +1,4 @@
-# <img src="assets/logo.svg" alt="" width="72" align="middle"> tardigrade-runner
+# <img src="assets/logo.svg" alt="" width="72" align="middle"> mossbed
 
 Minimal MCP stdio server that lets agents (pi coding agent) run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade),
@@ -23,7 +23,7 @@ the tardigrade binary itself.
 
 ## Run
 
-    pi mcp add tardigrade -- /absolute/path/to/tardigrade-runner/target/release/tardigrade-runner
+    pi mcp add tardigrade -- /absolute/path/to/mossbed/target/release/mossbed
 
 Binary resolution: `TARDIGRADE_BIN` env var, else `--tardigrade=<path>` flag, else
 `../tardigrade/target/release/tardigrade` relative to the working directory when
@@ -38,26 +38,26 @@ environment variables read at startup:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TARDIGRADE_RUNNER_MEM` | `256` | guest heap/ArrayBuffer cap, MiB |
-| `TARDIGRADE_RUNNER_AS` | `2048` | address-space belt floor (`prlimit --as`), MiB |
-| `TARDIGRADE_RUNNER_FS_QUOTA` | `64` | RAM-filesystem quota, MiB (`0` disables) |
-| `TARDIGRADE_RUNNER_INPUT_MAX` | `4194304` | largest `code`/`preload`/eval accepted, bytes |
-| `TARDIGRADE_RUNNER_DUMP_MAX` | `1048576` | largest dump returned inline, bytes |
-| `TARDIGRADE_RUNNER_ALLOW_CALL` | — | granted endpoints: `NAME=URL[,METHOD]` entries separated by `;` |
-| `TARDIGRADE_RUNNER_NET_MAX_RESPONSE` | `1048576` | per-response byte cap for granted calls |
-| `TARDIGRADE_RUNNER_NET_TOTAL_BYTES` | `8388608` | per-run network byte budget |
-| `TARDIGRADE_RUNNER_NET_TIMEOUT_MS` | `30000` | per-request network timeout |
-| `TARDIGRADE_RUNNER_NET_ALLOW_PRIVATE` | — | `1` lets granted endpoints resolve to private/loopback addresses |
-| `TARDIGRADE_RUNNER_MAX_SESSIONS` | `8` | concurrent sessions |
-| `TARDIGRADE_RUNNER_SESSION_IDLE_MS` | `300000` | idle time before a session is reaped |
+| `MOSSBED_MEM` | `256` | guest heap/ArrayBuffer cap, MiB |
+| `MOSSBED_AS` | `2048` | address-space belt floor (`prlimit --as`), MiB |
+| `MOSSBED_FS_QUOTA` | `64` | RAM-filesystem quota, MiB (`0` disables) |
+| `MOSSBED_INPUT_MAX` | `4194304` | largest `code`/`preload`/eval accepted, bytes |
+| `MOSSBED_DUMP_MAX` | `1048576` | largest dump returned inline, bytes |
+| `MOSSBED_ALLOW_CALL` | — | granted endpoints: `NAME=URL[,METHOD]` entries separated by `;` |
+| `MOSSBED_NET_MAX_RESPONSE` | `1048576` | per-response byte cap for granted calls |
+| `MOSSBED_NET_TOTAL_BYTES` | `8388608` | per-run network byte budget |
+| `MOSSBED_NET_TIMEOUT_MS` | `30000` | per-request network timeout |
+| `MOSSBED_NET_ALLOW_PRIVATE` | — | `1` lets granted endpoints resolve to private/loopback addresses |
+| `MOSSBED_MAX_SESSIONS` | `8` | concurrent sessions |
+| `MOSSBED_SESSION_IDLE_MS` | `300000` | idle time before a session is reaped |
 
-`TARDIGRADE_RUNNER_AS` is a floor, not the belt that applies: the runner
+`MOSSBED_AS` is a floor, not the belt that applies: the runner
 raises it to at least 128 GiB plus the heap cap to cover V8's startup
 address-space reservations. This is virtual address space, not resident RAM;
-a smaller belt can abort V8 before guest code runs. `TARDIGRADE_RUNNER_MEM`,
+a smaller belt can abort V8 before guest code runs. `MOSSBED_MEM`,
 not the belt, bounds the guest heap.
 
-With no `TARDIGRADE_RUNNER_ALLOW_CALL`, guests are fully offline and
+With no `MOSSBED_ALLOW_CALL`, guests are fully offline and
 `vm.net.request` does not exist. With grants, the guest calls endpoints by
 name only (`vm.net.request(name, body)`); URLs are never shown to the guest
 or returned in results, and tardigrade's sidecar enforces the budgets and

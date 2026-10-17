@@ -28,7 +28,7 @@ pub const DEFAULT_AS_CAP_MB: u64 = 2048;
 /// The tardigrade default is 256. It is passed explicitly so the effective
 /// cap appears in the result rather than being implied, and it is an operator
 /// setting rather than a tool parameter: a model must not be able to lift its
-/// own ceiling. Raise it with TARDIGRADE_RUNNER_MEM.
+/// own ceiling. Raise it with MOSSBED_MEM.
 pub const DEFAULT_HEAP_MB: u64 = 256;
 
 /// Tardigrade refuses --memory below this.
@@ -58,18 +58,18 @@ const MAX_TIMEOUT_MS: u32 = 3_600_000;
 /// Per-stream capture cap while draining a running guest.
 pub const DRAIN_CAP_BYTES: usize = 64 * 1024;
 
-/// Largest end-of-run dump returned inline, in bytes (TARDIGRADE_RUNNER_DUMP_MAX).
+/// Largest end-of-run dump returned inline, in bytes (MOSSBED_DUMP_MAX).
 pub const DEFAULT_DUMP_MAX_BYTES: u64 = 1024 * 1024;
 
 /// RAM-filesystem quota in MiB, passed to tardigrade as --fs-quota.
 /// Tardigrade's own default; passed explicitly and reported in the result,
-/// and an operator setting (TARDIGRADE_RUNNER_FS_QUOTA) for the same reason
+/// and an operator setting (MOSSBED_FS_QUOTA) for the same reason
 /// the heap cap is: a model must not lift its own ceilings. 0 disables it,
 /// as tardigrade defines.
 pub const DEFAULT_FS_QUOTA_MB: u64 = 64;
 
 /// Largest guest script or preload snapshot accepted, in bytes
-/// (TARDIGRADE_RUNNER_INPUT_MAX). Without it a caller could make the runner
+/// (MOSSBED_INPUT_MAX). Without it a caller could make the runner
 /// write an arbitrarily large temp file; the outbound dump was always
 /// capped, the inbound side was not.
 pub const DEFAULT_INPUT_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -88,7 +88,7 @@ pub const TRUNCATED_MARKER: &str = "…[truncated]";
 
 /// One operator-granted network endpoint: the guest may call
 /// `vm.net.request(name, body)` and reach only `url`, by name. Grants are an
-/// operator setting (TARDIGRADE_RUNNER_ALLOW_CALL), never a tool argument:
+/// operator setting (MOSSBED_ALLOW_CALL), never a tool argument:
 /// a model must not be able to grant itself egress. The URL is never shown
 /// to the guest or returned in a result; only names are advertised.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,7 +99,7 @@ pub struct AllowCall {
     pub method: Option<String>,
 }
 
-/// Parses the TARDIGRADE_RUNNER_ALLOW_CALL grammar: entries separated by
+/// Parses the MOSSBED_ALLOW_CALL grammar: entries separated by
 /// `;`, each `NAME=URL` or `NAME=URL,METHOD` (tardigrade's own flag shape,
 /// so an operator can copy flags they already know).
 pub fn parse_allow_calls(spec: &str) -> Result<Vec<AllowCall>, String> {
@@ -301,7 +301,7 @@ fn probe_capabilities(bin: &Path) -> Capabilities {
     let mut caps = parse_capabilities(&usage);
     if !caps.module {
         caps.module = Command::new(bin)
-            .args(["--module", "/nonexistent-tardigrade-runner-probe.js"])
+            .args(["--module", "/nonexistent-mossbed-probe.js"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -346,16 +346,15 @@ pub struct Runner {
     net_max_response: u64,
     net_total_bytes: u64,
     net_timeout_ms: u64,
-    /// Operator opt-in only (TARDIGRADE_RUNNER_NET_ALLOW_PRIVATE=1):
+    /// Operator opt-in only (MOSSBED_NET_ALLOW_PRIVATE=1):
     /// granted endpoints may resolve to private/loopback addresses.
     net_allow_private: bool,
 }
 
 impl Runner {
     pub fn new(bin: PathBuf) -> Result<Runner, String> {
-        let allow_calls = match std::env::var("TARDIGRADE_RUNNER_ALLOW_CALL") {
-            Ok(v) => parse_allow_calls(&v)
-                .map_err(|e| format!("bad TARDIGRADE_RUNNER_ALLOW_CALL: {e}"))?,
+        let allow_calls = match std::env::var("MOSSBED_ALLOW_CALL") {
+            Ok(v) => parse_allow_calls(&v).map_err(|e| format!("bad MOSSBED_ALLOW_CALL: {e}"))?,
             Err(_) => Vec::new(),
         };
         Ok(Runner {
@@ -363,37 +362,24 @@ impl Runner {
             sandbox_ok: false,
             caps: Capabilities::default(),
             prlimit: find_in_path("prlimit"),
-            as_cap_mb: env_setting("TARDIGRADE_RUNNER_AS", DEFAULT_AS_CAP_MB, "MiB")?,
-            heap_mb: env_setting("TARDIGRADE_RUNNER_MEM", DEFAULT_HEAP_MB, "MiB")?,
-            dump_max_bytes: env_setting(
-                "TARDIGRADE_RUNNER_DUMP_MAX",
-                DEFAULT_DUMP_MAX_BYTES,
-                "bytes",
-            )?,
-            fs_quota_mb: env_setting("TARDIGRADE_RUNNER_FS_QUOTA", DEFAULT_FS_QUOTA_MB, "MiB")?,
-            input_max_bytes: env_setting(
-                "TARDIGRADE_RUNNER_INPUT_MAX",
-                DEFAULT_INPUT_MAX_BYTES,
-                "bytes",
-            )?,
+            as_cap_mb: env_setting("MOSSBED_AS", DEFAULT_AS_CAP_MB, "MiB")?,
+            heap_mb: env_setting("MOSSBED_MEM", DEFAULT_HEAP_MB, "MiB")?,
+            dump_max_bytes: env_setting("MOSSBED_DUMP_MAX", DEFAULT_DUMP_MAX_BYTES, "bytes")?,
+            fs_quota_mb: env_setting("MOSSBED_FS_QUOTA", DEFAULT_FS_QUOTA_MB, "MiB")?,
+            input_max_bytes: env_setting("MOSSBED_INPUT_MAX", DEFAULT_INPUT_MAX_BYTES, "bytes")?,
             allow_calls,
             net_max_response: env_setting(
-                "TARDIGRADE_RUNNER_NET_MAX_RESPONSE",
+                "MOSSBED_NET_MAX_RESPONSE",
                 DEFAULT_NET_MAX_RESPONSE,
                 "bytes",
             )?,
             net_total_bytes: env_setting(
-                "TARDIGRADE_RUNNER_NET_TOTAL_BYTES",
+                "MOSSBED_NET_TOTAL_BYTES",
                 DEFAULT_NET_TOTAL_BYTES,
                 "bytes",
             )?,
-            net_timeout_ms: env_setting(
-                "TARDIGRADE_RUNNER_NET_TIMEOUT_MS",
-                DEFAULT_NET_TIMEOUT_MS,
-                "ms",
-            )?,
-            net_allow_private: std::env::var("TARDIGRADE_RUNNER_NET_ALLOW_PRIVATE").as_deref()
-                == Ok("1"),
+            net_timeout_ms: env_setting("MOSSBED_NET_TIMEOUT_MS", DEFAULT_NET_TIMEOUT_MS, "ms")?,
+            net_allow_private: std::env::var("MOSSBED_NET_ALLOW_PRIVATE").as_deref() == Ok("1"),
         })
     }
 
@@ -413,7 +399,7 @@ impl Runner {
     }
 
     /// Set the heap cap. For operators and tests; the server reads
-    /// TARDIGRADE_RUNNER_MEM instead.
+    /// MOSSBED_MEM instead.
     pub fn with_heap_mb(mut self, mb: u64) -> Runner {
         self.heap_mb = mb;
         self
@@ -437,7 +423,7 @@ impl Runner {
     }
 
     /// Grant network endpoints. For operators and tests; the server reads
-    /// TARDIGRADE_RUNNER_ALLOW_CALL instead. Grants take effect only if
+    /// MOSSBED_ALLOW_CALL instead. Grants take effect only if
     /// the probed binary supports --allow-call (checked at the gate).
     pub fn with_allow_calls(mut self, grants: Vec<AllowCall>) -> Runner {
         self.allow_calls = grants;
@@ -518,7 +504,7 @@ impl Runner {
     fn validate_run(&self, code: &str, opts: &RunOptions) -> Result<(), String> {
         if code.len() > self.input_max_bytes {
             return Err(format!(
-                "code is {} bytes, over the {} byte input cap (raise TARDIGRADE_RUNNER_INPUT_MAX)",
+                "code is {} bytes, over the {} byte input cap (raise MOSSBED_INPUT_MAX)",
                 code.len(),
                 self.input_max_bytes
             ));
@@ -526,7 +512,7 @@ impl Runner {
         if let Some(preload) = &opts.preload {
             if preload.len() > self.input_max_bytes {
                 return Err(format!(
-                    "preload is {} bytes, over the {} byte input cap (raise TARDIGRADE_RUNNER_INPUT_MAX)",
+                    "preload is {} bytes, over the {} byte input cap (raise MOSSBED_INPUT_MAX)",
                     preload.len(),
                     self.input_max_bytes
                 ));
@@ -630,7 +616,7 @@ impl Runner {
             return (
                 None,
                 Some(format!(
-                    "tardigrade-runner: dump suppressed ({len} bytes > {} cap); keep handed-off state small or raise TARDIGRADE_RUNNER_DUMP_MAX\n",
+                    "mossbed: dump suppressed ({len} bytes > {} cap); keep handed-off state small or raise MOSSBED_DUMP_MAX\n",
                     self.dump_max_bytes
                 )),
             );
@@ -1053,7 +1039,7 @@ impl Session {
             let len = fs::metadata(dump_file).map(|m| m.len()).unwrap_or(0);
             if len > self.dump_max_bytes {
                 stderr.push_str(&format!(
-                    "tardigrade-runner: dump suppressed ({len} bytes > {} cap); keep handed-off state small or raise TARDIGRADE_RUNNER_DUMP_MAX\n",
+                    "mossbed: dump suppressed ({len} bytes > {} cap); keep handed-off state small or raise MOSSBED_DUMP_MAX\n",
                     self.dump_max_bytes
                 ));
                 None
@@ -1119,7 +1105,7 @@ static SCRIPT_SEQ: AtomicU64 = AtomicU64::new(0);
 ///
 /// TempScript removes each script file, but nothing removed the directory
 /// holding them, so a server lifetime used to leave an empty
-/// tardigrade-runner-<pid> behind in /tmp. Call this once, when the process is
+/// mossbed-<pid> behind in /tmp. Call this once, when the process is
 /// finished with the runner: the directory is shared by every [`Runner`] in the
 /// process, so tying the cleanup to a single Runner would let one instance
 /// delete the directory another is still writing into.
@@ -1142,7 +1128,7 @@ impl Drop for TempScript<'_> {
 /// Shared by the writer and by the cleanup in Drop for Runner, so the two
 /// cannot drift apart.
 fn script_dir_path() -> PathBuf {
-    std::env::temp_dir().join(format!("tardigrade-runner-{}", std::process::id()))
+    std::env::temp_dir().join(format!("mossbed-{}", std::process::id()))
 }
 
 /// 0700 + atomic mkdir closes the /tmp symlink hole: a private dir only we
@@ -1241,10 +1227,10 @@ fn with_abort_note(stderr: String, heap_mb: u64) -> String {
         || stderr.contains("DateTimePatternGeneratorCache")
         || stderr.contains("Icu error")
     {
-        "tardigrade-runner: this build ships no ICU data, so Intl and the toLocale* methods are unavailable (a known tardigrade limitation, not your script). Format dates and numbers by hand, and pass clock: real if the current time is needed.".to_owned()
+        "mossbed: this build ships no ICU data, so Intl and the toLocale* methods are unavailable (a known tardigrade limitation, not your script). Format dates and numbers by hand, and pass clock: real if the current time is needed.".to_owned()
     } else if stderr.contains("Fatal process out of memory") {
         format!(
-            "tardigrade-runner: the guest hit a hard memory limit and V8 aborted it. The heap and ArrayBuffer were each capped at {heap_mb} MiB for this run; exceeding them normally raises a catchable RangeError, so an abort here means V8 ran out of room before guest code could catch the limit."
+            "mossbed: the guest hit a hard memory limit and V8 aborted it. The heap and ArrayBuffer were each capped at {heap_mb} MiB for this run; exceeding them normally raises a catchable RangeError, so an abort here means V8 ran out of room before guest code could catch the limit."
         )
     } else {
         return stderr;
@@ -1303,7 +1289,7 @@ mod tests {
     #[test]
     fn temp_script_lives_in_private_dir_with_tight_modes() {
         let script = write_temp_script("console.log(1);").expect("write temp script");
-        let dir = std::env::temp_dir().join(format!("tardigrade-runner-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mossbed-{}", std::process::id()));
         assert!(
             script.starts_with(&dir),
             "script {:?} not inside {dir:?}",

@@ -13,7 +13,7 @@
 //!
 //! They skip when the binary is absent, like the rest of the suite.
 
-use tardigrade_runner::{RunOptions, RunStatus};
+use mossbed::{RunOptions, RunStatus};
 
 mod common;
 use common::runner;

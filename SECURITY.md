@@ -1,6 +1,6 @@
 # Security
 
-tardigrade-runner is a thin supervisor around
+mossbed is a thin supervisor around
 [tardigrade](https://github.com/zbrdc/tardigrade): the containment is
 tardigrade's, and this server decides whether to use it, how long a run may
 last, how much memory and filesystem it may take, and which named network
@@ -28,7 +28,7 @@ promise; expect a reply when there is one.
   reservation, tens of GiB in the current build — so the heap cap is what
   bounds a guest; the belt only backstops the process as a whole.
 - **Keeping the guest offline by default.** Network access exists only when
-  the operator grants named endpoints (`TARDIGRADE_RUNNER_ALLOW_CALL`). The
+  the operator grants named endpoints (`MOSSBED_ALLOW_CALL`). The
   guest names a capability; it never sees a URL, cannot name an ungranted
   endpoint, and private/loopback resolution stays refused unless the operator
   explicitly opts in. Grants, budgets and address enforcement otherwise live

@@ -5,7 +5,7 @@
 //! ../tardigrade/target/release/tardigrade, or TARDIGRADE_BIN).
 //! Each test skips with a message when the binary is not found.
 
-use tardigrade_runner::{DRAIN_CAP_BYTES, RunOptions, RunStatus, TRUNCATED_MARKER};
+use mossbed::{DRAIN_CAP_BYTES, RunOptions, RunStatus, TRUNCATED_MARKER};
 
 mod common;
 use common::runner;

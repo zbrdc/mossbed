@@ -13,7 +13,7 @@
 //!
 //! They skip when the binary is absent, like the rest of the suite.
 
-use tardigrade_runner::{RunOptions, RunStatus, Runner};
+use mossbed::{RunOptions, RunStatus, Runner};
 
 mod common;
 use common::runner;
@@ -292,7 +292,7 @@ fn a_granted_endpoint_is_reachable_by_name_only() {
     });
 
     let runner = runner
-        .with_allow_calls(vec![tardigrade_runner::AllowCall {
+        .with_allow_calls(vec![mossbed::AllowCall {
             name: "ping".into(),
             url: format!("http://{addr}/ping"),
             method: Some("POST".into()),

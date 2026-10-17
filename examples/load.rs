@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Instant;
 
-use tardigrade_runner::{RunOptions, Runner, resolve_bin};
+use mossbed::{RunOptions, Runner, resolve_bin};
 
 fn cpu_seconds() -> f64 {
     let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
@@ -77,7 +77,7 @@ fn main() {
                         break;
                     }
                     match runner.run_js(&code, &opts) {
-                        Ok(result) if result.status == tardigrade_runner::RunStatus::Ok => {
+                        Ok(result) if result.status == mossbed::RunStatus::Ok => {
                             own.push(result.duration_ms)
                         }
                         Ok(_) => own.push(0),

@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use tardigrade_runner::{
+use mossbed::{
     DRAIN_CAP_BYTES, RunOptions, RunResult, Runner, Session, TRUNCATED_MARKER, resolve_bin,
 };
 
@@ -107,20 +107,17 @@ fn main() {
     let mut runner = match Runner::new(bin) {
         Ok(runner) => runner,
         Err(msg) => {
-            eprintln!("tardigrade-runner: {msg}");
+            eprintln!("mossbed: {msg}");
             std::process::exit(2);
         }
     };
     let (max_sessions, session_idle) = match (
-        env_usize("TARDIGRADE_RUNNER_MAX_SESSIONS", DEFAULT_MAX_SESSIONS),
-        env_usize(
-            "TARDIGRADE_RUNNER_SESSION_IDLE_MS",
-            DEFAULT_SESSION_IDLE_MS as usize,
-        ),
+        env_usize("MOSSBED_MAX_SESSIONS", DEFAULT_MAX_SESSIONS),
+        env_usize("MOSSBED_SESSION_IDLE_MS", DEFAULT_SESSION_IDLE_MS as usize),
     ) {
         (Ok(max), Ok(idle)) => (max, Duration::from_millis(idle as u64)),
         (Err(msg), _) | (_, Err(msg)) => {
-            eprintln!("tardigrade-runner: {msg}");
+            eprintln!("mossbed: {msg}");
             std::process::exit(2);
         }
     };
@@ -129,7 +126,7 @@ fn main() {
     // but refuses every run with a clear error.
     let gate = runner.sandbox_check();
     if let Err(msg) = &gate {
-        eprintln!("tardigrade-runner: refusing all runs: {msg}");
+        eprintln!("mossbed: refusing all runs: {msg}");
     }
 
     let state = Arc::new(State {
@@ -172,7 +169,7 @@ fn main() {
     // No run or eval can be in flight now: close every guest and drop the
     // per-process directory rather than leaving an empty one behind.
     close_all_sessions(&state);
-    tardigrade_runner::cleanup_script_dir();
+    mossbed::cleanup_script_dir();
 }
 
 fn close_all_sessions(state: &State) {
@@ -247,7 +244,7 @@ fn initialize(params: Option<&Value>) -> Value {
     json!({
         "protocolVersion": version,
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "tardigrade-runner", "version": env!("CARGO_PKG_VERSION")},
+        "serverInfo": {"name": "mossbed", "version": env!("CARGO_PKG_VERSION")},
     })
 }
 
@@ -462,7 +459,7 @@ fn session_open_tool(params: &Value, state: &State) -> Result<Value, (i32, Strin
         let sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
         if sessions.len() >= state.max_sessions {
             return Ok(error_text(format!(
-                "refused: {} sessions already open (operator cap TARDIGRADE_RUNNER_MAX_SESSIONS); close one first",
+                "refused: {} sessions already open (operator cap MOSSBED_MAX_SESSIONS); close one first",
                 state.max_sessions
             )));
         }
