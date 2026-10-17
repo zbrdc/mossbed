@@ -3,16 +3,22 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-10-17
+## [Unreleased]
 
 ### Changed
 
+- Replaced the old line-art logo with the moss tile icon and sheltered-tardigrade
+  mascot. Added transparent SVG/PNG assets, a favicon, and usage guidance.
+- Updated installation and migration instructions for the mossbed name.
+- Renamed the GitHub repository to `zbrdc/mossbed` and updated repository links.
 - **Renamed: project, crate and binary are now `mossbed`** (was
   `tardigrade-runner` — after the moss a tardigrade lives in, since this
   server is the habitat the engine runs in). Every operator setting renamed
-  with it: `TARDIGRADE_RUNNER_*` is now `MOSSBED_*`. Unchanged: tool names
-  keep their `tardigrade_` prefix because they operate the tardigrade
-  engine, and `TARDIGRADE_BIN` still selects that engine binary.
+  with it: `TARDIGRADE_RUNNER_*` is now `MOSSBED_*`. The unprefixed MCP tool
+  names remain `run_js`, `session_open`, `session_eval`, and `session_close`.
+  Client-generated prefixes depend on the MCP registration name.
+  `TARDIGRADE_BIN` still selects the engine binary, and
+  `TARDIGRADE_ALLOW_UNCAPPED` keeps its existing name.
 
 ### Added
 
@@ -45,11 +51,10 @@ this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- The address-space belt is raised to cover V8's own reservation. Tardigrade's
-  current build (rusty_v8 139 with pointer compression) reserves about 69 GiB
-  of address space before any guest byte, so the old 2 GiB belt aborted V8 at
-  startup — every run failed, whatever the guest did. `MOSSBED_AS`
-  is now a floor and the effective belt is that floor plus the heap cap.
+- The address-space limit covers V8's startup reservations. With rusty_v8 152,
+  the former 72 GiB floor could abort the Oilpan cage reservation.
+  The effective limit is the larger of `MOSSBED_AS` and 128 GiB plus the heap cap.
+  This is virtual address space, not resident memory.
 - The OOM abort note hardcoded the 256 MiB heap default; it now names the
   cap actually applied.
 - Tests and the Intl failure note tracked a tardigrade that aborted inside
@@ -101,8 +106,7 @@ First release.
 - The suites that need the tardigrade binary skip themselves when it is absent;
   set TARDIGRADE_REQUIRE_TESTS=1 to make that a failure.
 
-[Unreleased]: https://github.com/zbrdc/tardigrade-runner/compare/v0.2.0...HEAD
-[0.3.0]: https://github.com/zbrdc/tardigrade-runner/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/zbrdc/tardigrade-runner/releases/tag/v0.2.0
-[0.1.0]: https://github.com/zbrdc/tardigrade-runner/releases/tag/v0.1.0
+[Unreleased]: https://github.com/zbrdc/mossbed/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/zbrdc/mossbed/releases/tag/v0.2.0
+[0.1.0]: https://github.com/zbrdc/mossbed/releases/tag/v0.1.0
 

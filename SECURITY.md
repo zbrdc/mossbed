@@ -27,6 +27,9 @@ promise; expect a reply when there is one.
   The belt is loose by necessity — it has to cover V8's own address-space
   reservation, tens of GiB in the current build — so the heap cap is what
   bounds a guest; the belt only backstops the process as a whole.
+  If `prlimit` is absent, runs are refused unless the operator sets
+  `TARDIGRADE_ALLOW_UNCAPPED=1`. This existing escape hatch removes the parent
+  address-space limit, not the guest sandbox or explicit heap cap.
 - **Keeping the guest offline by default.** Network access exists only when
   the operator grants named endpoints (`MOSSBED_ALLOW_CALL`). The
   guest names a capability; it never sees a URL, cannot name an ungranted
