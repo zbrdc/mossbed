@@ -13,10 +13,12 @@ keeps both green marks visible in light and dark GitHub themes.
 and `favicon.png` is 32 × 32. Use at least 24px where possible.
 At 16px, the silhouette remains visible but the winding channels compress.
 
+`icon-readme.png` is the square moss tile on opaque white for the project README.
+
 ## Sheltered tardigrade: mascot
 
-`logo.svg` is the vector source for the README mascot. `logo.png` is 512 × 313.
-`logo-readme.png` is the same mascot on opaque white for the project README.
+`logo.svg` is the vector source for the alternate mascot. `logo.png` is 512 × 313.
+`logo-readme.png` is the same mascot on opaque white.
 Use at least 144px wide for the eye and four feet. Small claws read best at
 256px or larger.
 

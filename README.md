@@ -1,6 +1,6 @@
 # mossbed
 
-<img src="assets/logo-readme.png" width="256" alt="Mossbed sheltered tardigrade mascot">
+<img src="assets/icon-readme.png" width="256" alt="Mossbed square moss-tile logo">
 
 Minimal MCP stdio server that lets agents (pi coding agent) run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade),
@@ -105,8 +105,8 @@ guest itself is tardigrade's to document: see its `docs/GUEST-API.md`,
 
 ## Project marks
 
-The moss tile is the compact application icon and favicon. The sheltered
-tardigrade is the README mascot. Both use moss green on transparent backgrounds.
+The moss tile is the project logo, application icon, and favicon. The sheltered
+tardigrade is an alternate mascot. Both use moss green on transparent backgrounds.
 Use them on light surfaces. See [Mossbed marks](assets/README.md) for files,
 dimensions, and minimum sizes.
 
