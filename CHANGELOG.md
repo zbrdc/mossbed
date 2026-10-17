@@ -7,6 +7,8 @@ this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Updated the agent skill for mossbed's tools, sessions, supported language paths,
+  and current safety limits. Its source now lives in `skills/mossbed/SKILL.md`.
 - Documented JavaScript and WebAssembly execution across README, language guide,
   package/API summaries, and MCP tool descriptions. TypeScript needs transpilation.
   C/C++/Rust need WebAssembly compilation and compatible imports.

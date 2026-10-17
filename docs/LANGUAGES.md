@@ -146,3 +146,4 @@ Unlike `run_js`, a session retains the instantiated module between evaluations.
 
 The engine's [guest API](https://github.com/zbrdc/tardigrade/blob/main/docs/GUEST-API.md)
 describes the available APIs. [README](../README.md) covers installation and operator limits.
+For agent workflows, use the [mossbed skill](../skills/mossbed/SKILL.md).
