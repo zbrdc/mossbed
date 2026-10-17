@@ -121,9 +121,9 @@ console.log(JSON.stringify({ chunks: n, mib: n * 16, err: err }));"#,
     );
 }
 
-/// WebAssembly executes inside the guest, and wasm memory is bounded by
-/// the same memory budget as everything else: a large allocation fails
-/// cleanly with a RangeError rather than crashing the process.
+/// WebAssembly executes inside the guest. JavaScript-created wasm memory
+/// reservations honor the memory budget. This does not cover memory defined
+/// inside a module, which bypasses the JavaScript constructor.
 #[test]
 fn wasm_executes_and_is_bounded_by_the_memory_cap() {
     let Some(runner) = runner() else { return };

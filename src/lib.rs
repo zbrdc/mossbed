@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 zbrdc
 
-//! Runs JavaScript in the sandboxed tardigrade V8 runtime.
+//! Runs JavaScript and JavaScript-loaded WebAssembly in sandboxed tardigrade.
+//! Transpile TypeScript to JavaScript first. Compile C/C++/Rust to WebAssembly
+//! and supply the module's imports. No native executables or compilers are built in.
 //!
 //! `Runner` resolves the tardigrade binary, fail-closes on
 //! `tardigrade --sandbox-check`, and executes guest code under a
@@ -1105,7 +1107,7 @@ static SCRIPT_SEQ: AtomicU64 = AtomicU64::new(0);
 ///
 /// TempScript removes each script file, but nothing removed the directory
 /// holding them, so a server lifetime used to leave an empty
-/// mossbed-<pid> behind in /tmp. Call this once, when the process is
+/// `mossbed-<pid>` behind in /tmp. Call this once, when the process is
 /// finished with the runner: the directory is shared by every [`Runner`] in the
 /// process, so tying the cleanup to a single Runner would let one instance
 /// delete the directory another is still writing into.

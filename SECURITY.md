@@ -24,9 +24,9 @@ promise; expect a reply when there is one.
   cap and RAM-filesystem quota handed to tardigrade, and size caps on inbound
   code/snapshots as well as outbound output/dumps. Every ceiling that bounds
   the guest is an operator setting, never a tool argument.
-  The belt is loose by necessity — it has to cover V8's own address-space
-  reservation, tens of GiB in the current build — so the heap cap is what
-  bounds a guest; the belt only backstops the process as a whole.
+  The address-space limit must allow for V8's startup reservations, so
+  mossbed sets a floor of 128 GiB. Neither the heap cap
+  nor this address-space limit is a hard resident-memory limit.
   If `prlimit` is absent, runs are refused unless the operator sets
   `TARDIGRADE_ALLOW_UNCAPPED=1`. This existing escape hatch removes the parent
   address-space limit, not the guest sandbox or explicit heap cap.
@@ -47,6 +47,22 @@ promise; expect a reply when there is one.
   applied, and the names (never URLs) of any granted network capabilities.
   Recognised guest failures are explained above the original trace rather
   than passed through bare, with the cap values actually in force.
+
+## Language and build boundaries
+
+JavaScript, transpiled TypeScript, and WebAssembly loaded from JavaScript run
+inside the same guest sandbox. C/C++/Rust need a WebAssembly build first.
+There is no native executable loader, compiler toolchain, or built-in WASI runtime.
+
+Host compilers, package managers, and build scripts run outside mossbed's
+sandbox. Treat untrusted source builds as a separate security boundary.
+A supplied WASI shim can use guest APIs, not arbitrary host files or processes.
+
+`MOSSBED_MEM` is not a total-process memory cap. WebAssembly module-defined
+memory can bypass JavaScript allocation accounting. Use external memory limits,
+such as cgroups, for hostile workloads. The engine's
+[memory limits](https://github.com/zbrdc/tardigrade/blob/main/docs/KNOWN_RISKS.md#memory)
+describe the remaining gaps.
 
 ## What it is not responsible for
 

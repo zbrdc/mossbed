@@ -1,7 +1,7 @@
 [package]
 name = "mossbed"
 version = "0.3.0"
-description = "MCP stdio server that runs generated JavaScript in the sandboxed tardigrade V8 runtime"
+description = "MCP stdio server that runs JavaScript and WebAssembly in the sandboxed tardigrade V8 runtime"
 repository = "https://github.com/zbrdc/mossbed"
 readme = "README.md"
 edition = "2024"

@@ -3,8 +3,8 @@
 </p>
 <h1 align="center">mossbed</h1>
 
-Minimal MCP stdio server that lets AI agents run generated
-JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade),
+Minimal MCP stdio server for sandboxed JavaScript and WebAssembly.
+It wraps [tardigrade](https://github.com/zbrdc/tardigrade),
 the sandboxed Rust V8 runtime. Its tools are `run_js` for stateless one-shot
 runs and, where the tardigrade binary offers `--serve`,
 `session_open`/`session_eval`/`session_close` for persistent sessions whose
@@ -16,6 +16,22 @@ rather than executing anything unconfined.
 Requests are handled concurrently and `run_js` calls can be cancelled with
 the standard MCP `notifications/cancelled`. Tool results are returned as
 text and as `structuredContent`.
+
+## Languages
+
+| Language | Preparation before execution |
+|---|---|
+| JavaScript | Send JavaScript directly to `run_js` or `session_open`. |
+| TypeScript | Transpile to JavaScript first. Bundle dependencies for the guest environment. |
+| C, C++, Rust | Compile to WebAssembly first. Load the module from JavaScript and supply its imports. |
+| Other languages | Use a compatible JavaScript or WebAssembly target, with any required runtime. |
+
+The MCP input is always JavaScript, not raw TypeScript, C/C++/Rust source, or a
+native executable. Mossbed does not provide compilers or a built-in WASI runtime.
+The guest is neither Node.js nor a browser.
+
+See [Running other languages](docs/LANGUAGES.md) for build examples, WebAssembly
+loading, and session use. Host compilation runs outside the isolate.
 
 ## Prerequisites
 

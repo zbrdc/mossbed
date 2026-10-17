@@ -7,6 +7,10 @@ this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Documented JavaScript and WebAssembly execution across README, language guide,
+  package/API summaries, and MCP tool descriptions. TypeScript needs transpilation.
+  C/C++/Rust need WebAssembly compilation and compatible imports.
+- Clarified host-build isolation, WASI requirements, and WebAssembly memory limits.
 - Replaced the old line-art logo with the moss tile icon and sheltered-tardigrade
   mascot. Added transparent SVG/PNG assets, a favicon, and usage guidance.
 - Updated installation and migration instructions for the mossbed name.
@@ -60,9 +64,9 @@ this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   cap actually applied.
 - Tests and the Intl failure note tracked a tardigrade that aborted inside
   ICU. Current tardigrade stubs Intl to a catchable error (exit 1), counts
-  WebAssembly memory against `--memory`, and stops a Uint8Array spree at
-  128 of the 256 MiB budget; the four affected tests now assert the
-  boundary properties rather than those incidental numbers, and the README
+  JavaScript-created `WebAssembly.Memory` reservations against `--memory`,
+  and stops a Uint8Array spree at 128 of the 256 MiB budget. The four affected
+  tests now assert the boundary properties rather than those incidental numbers, and the README
   points at tardigrade's `docs/` paths.
 
 ### Upgrade from tardigrade-runner

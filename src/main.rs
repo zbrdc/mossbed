@@ -36,6 +36,10 @@ const DEFAULT_SESSION_TTL_MS: u32 = 300_000;
 const DEFAULT_MAX_SESSIONS: usize = 8;
 const DEFAULT_SESSION_IDLE_MS: u64 = 300_000;
 
+const LANGUAGE_GUIDANCE: &str = "Transpile TypeScript to JavaScript first. For C/C++/Rust, \
+    compile to WebAssembly and load it from JavaScript. Supply any required imports or WASI shim. \
+    No compilers or WASI runtime are bundled. Native executables cannot run in the guest.";
+
 #[derive(Deserialize)]
 struct RunJsParams {
     code: String,
@@ -265,8 +269,9 @@ fn tool_specs(state: &State) -> Vec<Value> {
     };
     let mut tools = vec![json!({
         "name": "run_js",
-        "description": format!("Run JavaScript in the sandboxed tardigrade V8 runtime (Landlock + seccomp, \
-    RAM filesystem, no host APIs). Time is VIRTUAL by default: Date.now() is 0 and \
+        "description": format!("Run JavaScript and WebAssembly in the sandboxed tardigrade V8 runtime \
+    (Landlock + seccomp, RAM filesystem, no host APIs). {LANGUAGE_GUIDANCE} \
+    Time is VIRTUAL by default: Date.now() is 0 and \
     dates read as 1970, so pass clock: \"real\" for wall-clock time, or epoch_ms \
     for a fixed base. Runs are stateless unless you pass preload/dump: dump returns \
     the RAM filesystem as snapshot JSON in the result's dump field, and preload \
@@ -276,7 +281,7 @@ fn tool_specs(state: &State) -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "code": {"type": "string", "description": "JavaScript source to run"},
+                "code": {"type": "string", "description": "JavaScript source, including transpiled TypeScript or a WebAssembly loader. Not raw TS/C/C++/Rust source or a native executable."},
                 "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
                 "seed": {"type": "integer", "minimum": 0},
                 "clock": {"type": "string", "enum": ["virtual", "real"]},
@@ -298,15 +303,15 @@ fn tool_specs(state: &State) -> Vec<Value> {
     if state.runner.capabilities().serve {
         tools.push(json!({
             "name": "session_open",
-            "description": "Open a persistent sandboxed session (tardigrade --serve): one guest whose globals, \
+            "description": format!("Open a persistent sandboxed JavaScript/WebAssembly session (tardigrade --serve): one guest whose globals, \
         timers and RAM files survive across session_eval calls, unlike stateless run_js. entry_code runs once \
-        at startup. timeout_ms bounds each eval (the guest replies {\"$error\":\"command timed out\"} and the \
-        session continues); ttl_ms bounds the whole session. Returns {session_id, ...}; close with session_close. \
-        Idle sessions are reaped by the operator's settings.",
+        at startup. {LANGUAGE_GUIDANCE} timeout_ms bounds each eval (the guest replies {{\"$error\":\"command timed out\"}} and the \
+        session continues); ttl_ms bounds the whole session. Returns {{session_id, ...}}; close with session_close. \
+        Idle sessions are reaped by the operator's settings."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "entry_code": {"type": "string", "description": "JavaScript run once when the session starts"},
+                    "entry_code": {"type": "string", "description": "JavaScript run once at session startup. Can contain transpiled TypeScript or instantiate preloaded WebAssembly."},
                     "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 3600000,
                         "description": "Per-eval command timeout (default 10000)"},
                     "ttl_ms": {"type": "integer", "minimum": 1, "maximum": 3600000,
@@ -326,15 +331,16 @@ fn tool_specs(state: &State) -> Vec<Value> {
         }));
         tools.push(json!({
             "name": "session_eval",
-            "description": "Evaluate ONE expression (one line) in a session from session_open and return its value \
-        as JSON. Statements must be wrapped, e.g. (() => { let x = 1; return x })(). Promises are awaited. A guest \
+            "description": "Evaluate ONE JavaScript expression (one line) in a session from session_open and return its value \
+        as JSON. It can call loaded WebAssembly exports. Input is JavaScript, not raw TypeScript or C/C++/Rust source. \
+        Statements must be wrapped, e.g. (() => { let x = 1; return x })(). Promises are awaited. A guest \
         error comes back as {ok: false, error} and the session continues; guest console output arrives in stderr. \
         Returns {session_id, ok, value?, error?, stderr, duration_ms}.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "session_id": {"type": "string"},
-                    "code": {"type": "string", "description": "One JavaScript expression, one line"}
+                    "code": {"type": "string", "description": "One JavaScript expression, one line. Can call loaded WebAssembly exports."}
                 },
                 "required": ["session_id", "code"]
             },
@@ -675,6 +681,35 @@ mod tests {
             names,
             ["run_js"],
             "unprobed runner must not promise sessions"
+        );
+    }
+
+    #[test]
+    fn tool_discovery_explains_language_preparation() {
+        let reply = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            &test_state(),
+        )
+        .expect("tools/list reply");
+        let tool = &reply["result"]["tools"][0];
+        assert_eq!(tool["name"], "run_js");
+        let description = tool["description"].as_str().expect("description");
+        for guidance in [
+            "JavaScript",
+            "WebAssembly",
+            "TypeScript",
+            "C/C++/Rust",
+            "compile",
+            "WASI",
+            "Native executables",
+        ] {
+            assert!(description.contains(guidance), "missing {guidance}");
+        }
+        assert!(
+            tool["inputSchema"]["properties"]["code"]["description"]
+                .as_str()
+                .expect("code description")
+                .contains("JavaScript")
         );
     }
 
