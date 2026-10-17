@@ -238,3 +238,145 @@ fn killing_mossbed_leaves_no_guest_descendants() {
     }
     drop(hold);
 }
+
+#[test]
+fn session_hot_recycle_carries_the_filesystem_not_the_heap() {
+    // max_evals bounds a session: after the bound, the guest process is
+    // replaced under the same session id with the RAM filesystem restored
+    // (vm.snapshot -> preload). JavaScript globals are deliberately NOT
+    // carried - that is the documented carry-over semantics.
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+
+    let bin = std::env::var("TARDIGRADE_BIN").unwrap_or_else(|_| "tardigrade".into());
+    if !std::path::Path::new(&bin).is_file() {
+        eprintln!("SKIP: tardigrade binary not found");
+        return;
+    }
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mossbed"))
+        .env("TARDIGRADE_BIN", &bin)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn mossbed");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut send =
+        |stdin: &mut std::process::ChildStdin, id: i64, method: &str, params: serde_json::Value| {
+            let msg =
+                serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+            let _ = stdin.write_all(msg.to_string().as_bytes());
+            let _ = stdin.write_all(b"\n");
+            let _ = stdin.flush();
+        };
+    let read = |out: &mut BufReader<std::process::ChildStdout>| -> serde_json::Value {
+        let mut line = String::new();
+        out.read_line(&mut line).expect("read reply line");
+        serde_json::from_str(line.trim()).expect("reply is JSON")
+    };
+    send(
+        &mut stdin,
+        1,
+        "initialize",
+        serde_json::json!({
+            "protocolVersion": "2024-11-05", "capabilities": {},
+            "clientInfo": {"name": "t", "version": "0"}
+        }),
+    );
+    let _init = read(&mut out);
+    let _ = stdin.write_all(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.as_ref());
+    let _ = stdin.write_all(
+        b"
+",
+    );
+    let _ = stdin.flush();
+
+    // Open a session that sets a global and writes a file, recycling after 2 evals.
+    send(
+        &mut stdin,
+        2,
+        "tools/call",
+        serde_json::json!({
+            "name": "session_open",
+            "arguments": {
+                "entry_code": "globalThis.marker = 'from-entry'; vm.fs.write('/keep.txt', 'carried');",
+                "max_evals": 2,
+                "timeout_ms": 5000
+            }
+        }),
+    );
+    let open_reply = read(&mut out);
+    let sid = open_reply["result"]["structuredContent"]["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    send(
+        &mut stdin,
+        3,
+        "tools/call",
+        serde_json::json!({
+            "name": "session_eval",
+            "arguments": {"session_id": sid, "code": "'one'"}
+        }),
+    );
+    let r1 = read(&mut out);
+    assert_eq!(r1["result"]["structuredContent"]["value"], "one");
+    assert_eq!(r1["result"]["structuredContent"]["recycled"], false);
+
+    // The second eval crosses the max_evals bound: recycled after the reply.
+    send(
+        &mut stdin,
+        4,
+        "tools/call",
+        serde_json::json!({
+            "name": "session_eval",
+            "arguments": {"session_id": sid, "code": "'two'"}
+        }),
+    );
+    let r2 = read(&mut out);
+    assert_eq!(r2["result"]["structuredContent"]["value"], "two");
+    assert_eq!(
+        r2["result"]["structuredContent"]["recycled"], true,
+        "the max_evals bound must recycle the guest"
+    );
+
+    // Third eval on the same id: the file carried over, the global did not.
+    send(
+        &mut stdin,
+        5,
+        "tools/call",
+        serde_json::json!({
+            "name": "session_eval",
+            "arguments": {"session_id": sid, "code": "vm.fs.read('/keep.txt') + '|' + globalThis.marker + '|' + String(globalThis.runtime_marker)"}
+        }),
+    );
+    let r3 = read(&mut out);
+    let carried = r3["result"]["structuredContent"]["value"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        carried.starts_with("carried|from-entry|"),
+        "fs state must carry across the recycle: {carried}"
+    );
+    assert!(
+        carried.ends_with("|undefined"),
+        "JS globals must NOT carry across the recycle: {carried}"
+    );
+
+    send(
+        &mut stdin,
+        6,
+        "tools/call",
+        serde_json::json!({
+            "name": "session_close",
+            "arguments": {"session_id": sid}
+        }),
+    );
+    let _close = read(&mut out);
+    let _ = stdin; // keep the pipe open until the end
+    drop(stdin);
+    let _ = child.wait();
+}

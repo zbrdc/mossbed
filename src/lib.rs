@@ -150,7 +150,7 @@ pub fn parse_allow_calls(spec: &str) -> Result<Vec<AllowCall>, String> {
     Ok(out)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RunOptions {
     pub timeout_ms: u32,
     pub seed: u64,

@@ -63,6 +63,7 @@ struct RunBundleParams {
 #[derive(Deserialize)]
 struct SessionOpenParams {
     entry_code: Option<String>,
+    max_evals: Option<u32>,
     timeout_ms: Option<u32>,
     ttl_ms: Option<u32>,
     seed: Option<u64>,
@@ -88,6 +89,15 @@ struct SessionCloseParams {
 struct Managed {
     session: Arc<Mutex<Option<Session>>>,
     last_used: Instant,
+    /// Hot-recycle bound (docs: recycle after N evals); None disables. A
+    /// recycle snapshots the RAM filesystem (vm.snapshot), replaces the
+    /// guest process, and restores the snapshot, keeping the session id.
+    max_evals: Option<u32>,
+    evals: u32,
+    entry_code: Option<String>,
+    respawn_opts: RunOptions,
+    ttl_ms: u32,
+    generation: u32,
 }
 
 struct State {
@@ -336,6 +346,7 @@ fn tool_specs(state: &State) -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "entry_code": {"type": "string", "description": "JavaScript run once at session startup. Can contain transpiled TypeScript or instantiate preloaded WebAssembly."},
+                    "max_evals": {"type": "integer", "minimum": 1, "description": "Hot-recycle the session guest after this many successful evals: the RAM filesystem is snapshotted and restored in a fresh guest under the same session id; JavaScript globals are not carried. Bounds long-lived memory drift."},
                     "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 3600000,
                         "description": "Per-eval command timeout (default 10000)"},
                     "ttl_ms": {"type": "integer", "minimum": 1, "maximum": 3600000,
@@ -559,6 +570,12 @@ fn session_open_tool(params: &Value, state: &State) -> Result<Value, (i32, Strin
                 Managed {
                     session: Arc::new(Mutex::new(Some(session))),
                     last_used: Instant::now(),
+                    max_evals: args.max_evals.filter(|n| *n >= 1),
+                    evals: 0,
+                    entry_code: args.entry_code.clone(),
+                    respawn_opts: opts.clone(),
+                    ttl_ms,
+                    generation: 0,
                 },
             );
             Ok(structured(json!({
@@ -571,6 +588,7 @@ fn session_open_tool(params: &Value, state: &State) -> Result<Value, (i32, Strin
                 "fs_quota_mb": state.runner.fs_quota_mb(),
                 "net_capabilities": state.runner.net_capability_names(),
                 "engine": state.runner.engine(),
+                "max_evals": args.max_evals,
             })))
         }
         Err(msg) => Ok(error_text(msg)),
@@ -583,6 +601,84 @@ fn lookup_session(state: &State, session_id: &str) -> Option<Arc<Mutex<Option<Se
     let managed = sessions.get_mut(session_id)?;
     managed.last_used = Instant::now();
     Some(Arc::clone(&managed.session))
+}
+
+/// Hot-recycles a session past its max_evals bound: snapshots the guest's
+/// RAM filesystem (vm.snapshot), replaces the guest process with a fresh
+/// one that preloads the snapshot, and keeps the session id. The JS heap
+/// (globals) is NOT carried - only the filesystem - which is the
+/// documented carry-over semantics.
+fn maybe_recycle(
+    state: &State,
+    session_id: &str,
+    slot: &mut std::sync::MutexGuard<'_, Option<Session>>,
+) -> bool {
+    let (entry, mut opts, ttl) = {
+        let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(managed) = sessions.get_mut(session_id) else {
+            return false;
+        };
+        managed.evals += 1;
+        let hit = managed.max_evals.is_some_and(|n| managed.evals >= n);
+        if !hit {
+            return false;
+        }
+        (
+            managed.entry_code.clone(),
+            managed.respawn_opts.clone(),
+            managed.ttl_ms,
+        )
+    };
+    // Snapshot while the old guest still lives; a failed snapshot cancels
+    // the recycle rather than silently dropping state.
+    let Some(session) = slot.as_mut() else {
+        return false;
+    };
+    // The serve reply to vm.snapshot() IS the compact snapshot JSON;
+    // use it directly - a JSON.stringify round-trip would double-escape
+    // the payload and inflate it past the reply framing.
+    // vm.snapshot()'s serve reply JSON-encodes the snapshot, sometimes
+    // twice (a string wrapping a string); unwrap until it is an object.
+    let Some(mut snap) = session.eval("vm.snapshot()").ok() else {
+        return false;
+    };
+    let mut parsed: serde_json::Value = match serde_json::from_str(snap.reply.trim()) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    for _ in 0..2 {
+        match parsed {
+            serde_json::Value::String(inner) => {
+                parsed = match serde_json::from_str(&inner) {
+                    Ok(v) => v,
+                    Err(_) => return false,
+                };
+            }
+            other => {
+                parsed = other;
+                break;
+            }
+        }
+    }
+    if !parsed.is_object() {
+        return false;
+    }
+    let snapshot = parsed.to_string();
+    opts.preload = Some(snapshot);
+    // Swap the guest: taking the old Session drops it (group kill).
+    let _old = slot.take();
+    match state.runner.open_session(entry.as_deref(), &opts, ttl) {
+        Ok(fresh) => {
+            **slot = Some(fresh);
+            let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(managed) = sessions.get_mut(session_id) {
+                managed.evals = 0;
+                managed.generation += 1;
+            }
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 fn session_eval_tool(params: &Value, state: &State) -> Result<Value, (i32, String)> {
@@ -611,6 +707,7 @@ fn session_eval_tool(params: &Value, state: &State) -> Result<Value, (i32, Strin
                 Some(e) => (false, Value::Null, Some(e.clone())),
                 None => (true, parsed, None),
             };
+            let recycled = ok && maybe_recycle(state, &args.session_id, &mut slot);
             Ok(structured(json!({
                 "session_id": args.session_id,
                 "ok": ok,
@@ -618,6 +715,7 @@ fn session_eval_tool(params: &Value, state: &State) -> Result<Value, (i32, Strin
                 "error": error,
                 "stderr": reply.stderr,
                 "duration_ms": reply.duration_ms,
+                "recycled": recycled,
             })))
         }
         Err(msg) => {
