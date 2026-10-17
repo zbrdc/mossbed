@@ -17,12 +17,54 @@ Requests are handled concurrently and `run_js` calls can be cancelled with
 the standard MCP `notifications/cancelled`. Tool results are returned as
 text and as `structuredContent`.
 
-## Build
+## Prerequisites
+
+Mossbed requires a separately installed [tardigrade](https://github.com/zbrdc/tardigrade)
+runtime. Building mossbed does not install it.
+
+- **Linux x86_64**, with Landlock ABI 6 or newer (Linux 6.12+) and seccomp
+  with TSYNC enabled. Kernel version alone is not enough: the sandbox check
+  below must succeed in the same host or container where your MCP client runs.
+- **`prlimit`**, from util-linux, available on the MCP server's `PATH`.
+- **Rust and Cargo** for source builds. Mossbed requires Rust 1.85 or newer;
+  tardigrade's CI currently tests Rust 1.98.0, used in the commands below.
+- **A native C/C++ compiler and linker** for the Rust dependencies.
+- **Git and network access** for the initial build, including the prebuilt
+  V8 library downloaded from rusty_v8's GitHub releases.
+
+See tardigrade's [installation guide](https://github.com/zbrdc/tardigrade/blob/main/docs/INSTALL.md)
+and [sandbox requirements](https://github.com/zbrdc/tardigrade/blob/main/docs/SANDBOX.md)
+for current upstream requirements. Mossbed cannot execute guests on macOS,
+Windows, or Linux hosts without the required sandbox features.
+
+### Install tardigrade
+
+There are currently no upstream release binaries. From a directory where you
+keep source checkouts, build the latest default-branch source and install the
+runtime at a stable path:
+
+```sh
+git clone --depth 1 https://github.com/zbrdc/tardigrade.git
+rustup toolchain install 1.98.0 --profile minimal
+cargo +1.98.0 build --release --locked --bin tardigrade \
+  --manifest-path tardigrade/Cargo.toml --target-dir tardigrade/target
+install -Dm755 tardigrade/target/release/tardigrade "$HOME/.local/bin/tardigrade"
+"$HOME/.local/bin/tardigrade" --sandbox-check
+command -v prlimit
+```
+
+The sandbox check must exit successfully. If it fails, resolve the reported
+host or container restriction before using mossbed; it will not run guests
+without the sandbox. The HTTP bridge is not needed.
+
+Mossbed also checks engine capabilities: `--fs-quota` is required,
+`--serve` enables session tools, and `--allow-call` is required when network
+grants are configured. An older executable may be incompatible even if its
+sandbox check passes.
+
+## Build mossbed
 
     cargo build --release
-
-Requires Rust 1.85 or newer, a Linux kernel that tardigrade's cage supports, and
-the tardigrade binary itself.
 
 ## Run
 
@@ -37,7 +79,7 @@ For clients that use an `mcpServers` configuration:
     "mossbed": {
       "command": "/absolute/path/to/mossbed/target/release/mossbed",
       "env": {
-        "TARDIGRADE_BIN": "/absolute/path/to/tardigrade/target/release/tardigrade"
+        "TARDIGRADE_BIN": "/home/you/.local/bin/tardigrade"
       }
     }
   }
@@ -47,6 +89,10 @@ For clients that use an `mcpServers` configuration:
 Replace both paths with your executable paths. Other clients use different
 configuration formats; select stdio transport and set the same command and
 environment variable.
+
+Reconnect the MCP server after installing or replacing tardigrade, or changing
+its path. To verify execution, call `run_js` with `{"code":"console.log(42)"}`;
+the result should have `status: "ok"` and `stdout` containing `42`.
 
 Binary resolution: `TARDIGRADE_BIN` env var, else `--tardigrade=<path>` flag, else
 `../tardigrade/target/release/tardigrade` relative to the working directory when
