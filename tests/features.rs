@@ -194,7 +194,10 @@ fn killing_mossbed_leaves_no_guest_descendants() {
     // armed parent-death signal and only exits at the full net timeout
     // (MOSSBED_NET_TIMEOUT, default 30 s) after the guest is gone. The
     // guest itself dies at its --timeout (3 s). Tighten when FU-37 is fixed.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
+    // The guest dies at its --timeout (3 s); the sidecar now watches the
+    // wire and exits within milliseconds of the guest dying (tardigrade
+    // b4e4ef3, closing FU-37), so the whole cascade clears in seconds.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let mut survivors = 0;
         for entry in std::fs::read_dir("/proc").unwrap().flatten() {
