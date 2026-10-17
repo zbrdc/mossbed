@@ -10,6 +10,7 @@ this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - Replaced the old line-art logo with the moss tile icon and sheltered-tardigrade
   mascot. Added transparent SVG/PNG assets, a favicon, and usage guidance.
 - Updated installation and migration instructions for the mossbed name.
+- Made README setup instructions client-neutral; moved rename migration notes here.
 - Renamed the GitHub repository to `zbrdc/mossbed` and updated repository links.
 - **Renamed: project, crate and binary are now `mossbed`** (was
   `tardigrade-runner` — after the moss a tardigrade lives in, since this
@@ -63,6 +64,28 @@ this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   128 of the 256 MiB budget; the four affected tests now assert the
   boundary properties rather than those incidental numbers, and the README
   points at tardigrade's `docs/` paths.
+
+### Upgrade from tardigrade-runner
+
+Mossbed is the new name for `tardigrade-runner`. The separate `tardigrade`
+runtime keeps its name. The repository is now `zbrdc/mossbed`.
+
+For an existing clone, update its remote:
+
+    git remote set-url origin https://github.com/zbrdc/mossbed.git
+
+- Update the MCP command path to the `mossbed` binary in your actual checkout.
+- Replace each `TARDIGRADE_RUNNER_*` setting with its `MOSSBED_*` equivalent.
+  The old names are no longer read. Migrate custom limits and grants before
+  starting the new binary.
+- Keep `TARDIGRADE_BIN` and `--tardigrade=<path>` unchanged.
+- Use `mossbed` as the MCP registration name for new installations.
+  Existing installations can retain their registration name to preserve
+  client-generated tool prefixes.
+- Reconnect the MCP server after updating its configuration.
+
+The unprefixed tool names remain `run_js`, `session_open`, `session_eval`, and
+`session_close`. Update saved tool references if you change the registration name.
 
 ## [0.2.0] - 2026-10-12
 

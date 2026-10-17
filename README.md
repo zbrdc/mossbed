@@ -2,7 +2,7 @@
 
 <img src="assets/icon-readme.png" width="256" alt="Mossbed square moss-tile logo">
 
-Minimal MCP stdio server that lets agents (pi coding agent) run generated
+Minimal MCP stdio server that lets AI agents run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade),
 the sandboxed Rust V8 runtime. Its tools are `run_js` for stateless one-shot
 runs and, where the tardigrade binary offers `--serve`,
@@ -25,38 +25,34 @@ the tardigrade binary itself.
 
 ## Run
 
-    pi mcp add mossbed -- /absolute/path/to/mossbed/target/release/mossbed
+Register mossbed as a stdio server in your MCP client. The client launches
+the executable and communicates over stdin/stdout; no HTTP service is needed.
+
+For clients that use an `mcpServers` configuration:
+
+```json
+{
+  "mcpServers": {
+    "mossbed": {
+      "command": "/absolute/path/to/mossbed/target/release/mossbed",
+      "env": {
+        "TARDIGRADE_BIN": "/absolute/path/to/tardigrade/target/release/tardigrade"
+      }
+    }
+  }
+}
+```
+
+Replace both paths with your executable paths. Other clients use different
+configuration formats; select stdio transport and set the same command and
+environment variable.
 
 Binary resolution: `TARDIGRADE_BIN` env var, else `--tardigrade=<path>` flag, else
 `../tardigrade/target/release/tardigrade` relative to the working directory when
 it exists, else `tardigrade` on `PATH`. Whatever is found must still pass
 `--sandbox-check` and a capability probe of its advertised flags.
 
-### Upgrade from tardigrade-runner
-
-Mossbed is the new name for `tardigrade-runner`. The separate `tardigrade`
-runtime keeps its name.
-
-The GitHub repository is now
-[`zbrdc/mossbed`](https://github.com/zbrdc/mossbed).
-
-For an existing clone, update its remote:
-
-    git remote set-url origin https://github.com/zbrdc/mossbed.git
-
-- Update the MCP command path to the `mossbed` binary in your actual checkout.
-- Replace each `TARDIGRADE_RUNNER_*` setting with its `MOSSBED_*` equivalent.
-  The old names are no longer read. Migrate custom limits and grants before
-  starting the new binary.
-- Keep `TARDIGRADE_BIN` and `--tardigrade=<path>` unchanged.
-- Use `mossbed` as the MCP registration name for new installations.
-  Existing installations can retain the `tardigrade` registration name to
-  preserve client-generated tool prefixes.
-- Reconnect the MCP server after updating its configuration.
-
-The server still exposes `run_js`, `session_open`, `session_eval`, and
-`session_close`. Clients can add the registration name as a prefix, such as
-`mossbed_run_js`. Update saved tool references if you change that name.
+Clients can add the registration name as a tool prefix, such as `mossbed_run_js`.
 
 ## Operator settings
 
