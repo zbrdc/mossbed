@@ -1,6 +1,6 @@
 # mossbed
 
-<img src="assets/brand.png" width="720" alt="Mossbed: moss tile icon on the left and sheltered tardigrade mascot on the right">
+<img src="assets/logo-readme.png" width="256" alt="Mossbed sheltered tardigrade mascot">
 
 Minimal MCP stdio server that lets agents (pi coding agent) run generated
 JavaScript safely. It wraps [tardigrade](https://github.com/zbrdc/tardigrade),

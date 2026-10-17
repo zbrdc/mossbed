@@ -4,7 +4,7 @@ Copyright 2026 zbrdc. Licensed under [Apache-2.0](../LICENSE).
 
 <img src="brand.png" width="720" alt="Moss tile icon on the left and sheltered tardigrade mascot on the right">
 
-`brand.png` is the 1000 × 360 README preview. Its opaque white background
+`brand.png` is the 1000 × 360 asset catalogue preview. Its opaque white background
 keeps both green marks visible in light and dark GitHub themes.
 
 ## Moss tile: compact icon
@@ -16,6 +16,7 @@ At 16px, the silhouette remains visible but the winding channels compress.
 ## Sheltered tardigrade: mascot
 
 `logo.svg` is the vector source for the README mascot. `logo.png` is 512 × 313.
+`logo-readme.png` is the same mascot on opaque white for the project README.
 Use at least 144px wide for the eye and four feet. Small claws read best at
 256px or larger.
 
